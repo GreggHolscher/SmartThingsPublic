@@ -4,7 +4,7 @@
  * -----------------------
  *
  * STOP:  Do NOT PUBLISH the code to GitHub, it is a VIOLATION of the license terms.
- * You are NOT allowed share, distribute, reuse or publicly host (e.g. GITHUB) the code. Refer to the license details on our website.
+ * You are NOT allowed to share, distribute, reuse or publicly host (e.g. GITHUB) the code. Refer to the license details on our website.
  *
  */
 
@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "07.06.04"
+    return "07.07.00"
 }
 
 /**
@@ -30,6 +30,9 @@ def clientVersion() {
 * Copyright RBoy Apps, redistribution or reuse of code is not allowed without permission
 *
 * Change Log:
+* 2018-8-1 - (v07.07.00) Added support for Arming/disarming ADT and resume playing the audio after notifications
+* 2018-7-31 - (v07.06.07) More stingent validation for date entry format
+* 2018-7-25 - (v07.06.06) Clean up comments, make Sure Programming Engine hardier, detect is someone added a code accidentally from another app and delete it
 * 2018-7-9 - (v07.06.04) Handle invalid date inputs more gracefully
 * 2018-7-2 - (v07.06.03) More accurate display message when detecting different pin code lengths for locks
 * 2018-6-30 - (v07.06.02) Actively notify user if lock programming fails due to communication issues
@@ -199,8 +202,9 @@ preferences {
 private getDefaultSendDelay() { 15 }
 private getDefaultRetries() { 5 }
 private getMaxRetries() { retries == null ? defaultRetries : retries }
-private codeOptions() {
-    def ret = [
+private getSchedulesSuffix() { ('A'..'C') }
+private getCodeOptions() {
+    [
         "Permanent": "Permanent",
         "One time": "One time (burner)",
         "Expire on": "Start/end date and time",
@@ -209,10 +213,21 @@ private codeOptions() {
         "Modes": "Activate on mode(s)",
         "Inactive": "Temporarily disabled"
     ]
-
-    return ret
 }
-
+private getSchedulingOptions() {
+    [
+        'All Week',
+        'Monday to Friday',
+        'Saturday & Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday'
+    ]
+}
 
 def setupApp() {
     log.trace "$settings"
@@ -241,7 +256,7 @@ def setupApp() {
                 maxCodes = maxCodes ? (lockMax ? Math.min(lockMax, maxCodes) as Integer : maxCodes) : (lockMax ?: 0) // Take the least amongst all selected locks
             }
             input name: "maxUserNames", title: "Number of users${maxCodes ? " (1 to ${maxCodes})" : ""}", type: "number", required: true, multiple: false, image: "http://www.rboyapps.com/images/Users.png", range: "1..${maxCodes ?: 999}"
-            href(name: "users", title: "Configure users", page: "usersPage", description: "Create users and custom actions", required: false, image: "http://www.rboyapps.com/images/User.png")
+            href(name: "users", title: "Manage users", page: "usersPage", description: "Create users and custom actions", required: false, image: "http://www.rboyapps.com/images/User.png")
         }
 
         section("General Settings") {
@@ -462,15 +477,22 @@ def unlockKeypadActionsPage(params) {
         section ("Door Keypad Unlock Actions${lock ? " for $lock" : ""}") {
             def priorHomePhrase = settings."homePhrase${lock}${user}"
             def priorHomeMode = settings."homeMode${lock}${user}"
-
+            def isLockKeypad = locks?.find{ it.name == lock }?.hasAttribute("armMode") // Check if the current lock (lock specific option) is a keypad
+            def isAnyLockKeypad = locks?.any { keypad -> keypad.hasAttribute("armMode") } // Check if any lock (for global options) is a keypad
+            
             paragraph "Run these actions when a user successfully unlocks the door using a code"
             input "homePhrase${lock}${user}", "enum", title: "Run routine", required: false, options: phrases, defaultValue: priorHomePhrase
             input "homeMode${lock}${user}", "mode", title: "Change mode to", required: false, multiple: false, defaultValue: priorHomeMode
-            if (lock ? (locks.find{ it.name == lock }?.hasAttribute("armMode") ? !settings."keypadArmDisarm${lock}${user}" : true) : true) { // Hide only if we have have a supported keypad for selected lock and using keypad to control SHM
+            if (lock ? (isLockKeypad ? !settings."keypadArmDisarm${lock}${user}" : true) : true) { // Hide only if we have have a supported keypad for selected lock and using keypad to control SHM
                 input "homeDisarm${lock}${user}", "bool", title: "Disarm Smart Home Monitor", required: false
+                input "adtDisarm${lock}${user}", "bool", title: "Disarm ADT", required: false, submitOnChange: true
             }
-            if ((lock ? locks.find { it.name == lock } : locks)?.any { keypad -> keypad.hasAttribute("armMode") }) { // Show only if we have a supported keypad (for selected lock or for general settings)
-                input "keypadArmDisarm${lock}${user}", "bool", title: "Control Smart Home Monitor using keypad", required: false, submitOnChange: (lock ? true : false)
+            if (lock ? isLockKeypad : isAnyLockKeypad) { // Show only if we have a supported keypad (for selected lock or for general settings)
+                input "keypadArmDisarm${lock}${user}", "bool", title: "Control SHM/ADT using keypad", required: false, submitOnChange: true
+            }
+            if (((lock ? (isLockKeypad ? !settings."keypadArmDisarm${lock}${user}" : true) : true) && settings."adtDisarm${lock}${user}") ||
+                ((lock ? isLockKeypad : isAnyLockKeypad) && settings."keypadArmDisarm${lock}${user}")) { // If we have a seleted an ADT option
+                input "adtDevices", "capability.battery", title: "Select ADT panel(s)", multiple: true, required: (settings."adtDisarm${lock}${user}" ? true : false) // Required if we select ADT
             }
             input "turnOnSwitchesAfterSunset${lock}${user}", "capability.switch", title: "Turn on light(s) after dark", required: false, multiple: true
             input "turnOnSwitches${lock}${user}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
@@ -521,6 +543,10 @@ def unlockManualActionsPage(params) {
             input "homePhraseManual${lock}", "enum", title: "Run routine", required: false, options: phrases, defaultValue: priorHomePhrase
             input "homeModeManual${lock}", "mode", title: "Change mode to", required: false, multiple: false, defaultValue: priorHomeMode
             input "homeDisarmManual${lock}", "bool", title: "Disarm Smart Home Monitor", required: false
+            input "adtDisarmManual${lock}", "bool", title: "Disarm ADT", required: false, submitOnChange: true
+            if (settings."adtDisarmManual${lock}") { // If we have a seleted an ADT option
+                input "adtDevices", "capability.battery", title: "Select ADT panel(s)", multiple: true, required: true // Required if we select ADT
+            }
             input "turnOnSwitchesAfterSunsetManual${lock}", "capability.switch", title: "Turn on light(s) after dark", required: false, multiple: true
             input "turnOnSwitchesManual${lock}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
             input "turnOffSwitchesManual${lock}", "capability.switch", title: "Turn off switch(s)", required: false, multiple: true
@@ -575,18 +601,25 @@ def lockKeypadActionsPage(params) {
         section ("Door Keypad Lock Actions${lock ? " for $lock" : ""}") {
             def priorLockPhrase = settings."externalLockPhrase${lock}${user}"
             def priorHomeMode = settings."externalLockMode${lock}${user}"
+            def isLockKeypad = locks?.find{ it.name == lock }?.hasAttribute("armMode") // Check if the current lock (lock specific option) is a keypad
+            def isAnyLockKeypad = locks?.any { keypad -> keypad.hasAttribute("armMode") } // Check if any lock (for global options) is a keypad
 
             paragraph "Some locks can be locked from the keypad outside${user ? " with user codes" : ""}. If your lock has his feature then you can assign actions to execute when it is locked ${user ? "with a user code" : "from the keypad"}"
             input "externalLockPhrase${lock}${user}", "enum", title: "Run routine", required: false, options: phrases, defaultValue: priorLockPhrase
             input "externalLockMode${lock}${user}", "mode", title: "Change mode to", required: false, multiple: false, defaultValue: priorHomeMode
-            if (lock ? (locks.find{ it.name == lock }?.hasAttribute("armMode") ? !settings."keypadArmDisarm${lock}${user}" : true) : true) { // Hide only if we have have a supported keypad for selected lock and using keypad to control SHM
+            if (lock ? (isLockKeypad ? !settings."keypadArmDisarm${lock}${user}" : true) : true) { // Hide only if we have have a supported keypad for selected lock and using keypad to control SHM
                 input "homeArm${lock}${user}", "bool", title: "Arm Smart Home Monitor to Away", required: false, submitOnChange: true
-                if (settings."homeArm${lock}${user}") {
+                input "adtArm${lock}${user}", "bool", title: "Arm ADT to Away", required: false, submitOnChange: true
+                if (settings."homeArm${lock}${user}" || settings."adtArm${lock}${user}") {
                     input "homeArmStay${lock}${user}", "bool", title: "...arm to Stay instead of Away", required: false
                 }
             }
-            if ((lock ? locks.find { it.name == lock } : locks)?.any { keypad -> keypad.hasAttribute("armMode") }) { // Show only if we have a supported keypad (for selected lock or for general settings)
-                input "keypadArmDisarm${lock}${user}", "bool", title: "Control Smart Home Monitor using keypad", required: false, submitOnChange: (lock ? true : false)
+            if (lock ? isLockKeypad : isAnyLockKeypad) { // Show only if we have a supported keypad (for selected lock or for general settings)
+                input "keypadArmDisarm${lock}${user}", "bool", title: "Control SHM/ADT using keypad", required: false, submitOnChange: true
+            }
+            if (((lock ? (isLockKeypad ? !settings."keypadArmDisarm${lock}${user}" : true) : true) && settings."adtArm${lock}${user}") ||
+                ((lock ? isLockKeypad : isAnyLockKeypad) && settings."keypadArmDisarm${lock}${user}")) { // If we have a seleted an ADT option
+                input "adtDevices", "capability.battery", title: "Select ADT panel(s)", multiple: true, required: (settings."adtArm${lock}${user}" ? true : false) // Required if we select ADT
             }
             input "externalLockTurnOnSwitches${lock}${user}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
             input "externalLockTurnOffSwitches${lock}${user}", "capability.switch", title: "Turn off switch(s)", required: false, multiple: true
@@ -648,6 +681,10 @@ def lockManualActionsPage(params) {
             input "externalLockPhraseManual${lock}", "enum", title: "Run routine", required: false, options: phrases, defaultValue: priorLockPhrase
             input "externalLockModeManual${lock}", "mode", title: "Change mode to", required: false, multiple: false, defaultValue: priorHomeMode
             input "homeArmManual${lock}", "bool", title: "Arm Smart Home Monitor to Stay", required: false
+            input "adtArmManual${lock}", "bool", title: "Arm ADT to Stay", required: false, submitOnChange: true
+            if (settings."adtArmManual${lock}") { // If we have a seleted an ADT option
+                input "adtDevices", "capability.battery", title: "Select ADT panel(s)", multiple: true, required: true // Required if we select ADT
+            }
             input "externalLockTurnOnSwitchesManual${lock}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
             input "externalLockTurnOffSwitchesManual${lock}", "capability.switch", title: "Turn off switch(s)", required: false, multiple: true
             input "lockLocksManual${lock}","capability.lock", title: "Lock lock(s)", required: false, multiple: true
@@ -756,6 +793,9 @@ def usersPage() {
                             if (priorStartDate) {
                                 //log.trace "Found start date in setup"
                                 try {
+                                    if (!(priorStartDate ==~ /^\d{4}\-(0[1-9]|1[012])\-(0[1-9]|[12][0-9]|3[01])$/)) { // Check for valid date format (yyyy-MM-dd)
+                                        throw new RuntimeException("Invalid date format")
+                                    }
                                     def df = Date.parse("yyyy-MM-ddHH:mm", priorStartDate + "00:00") // Test it
                                     invalidStartDate = false
                                 }
@@ -767,6 +807,9 @@ def usersPage() {
                             if (priorExpireDate) {
                                 //log.trace "Found expiry date in setup"
                                 try {
+                                    if (!(priorExpireDate ==~ /^\d{4}\-(0[1-9]|1[012])\-(0[1-9]|[12][0-9]|3[01])$/)) { // Check for valid date format (yyyy-MM-dd)
+                                        throw new RuntimeException("Invalid date format")
+                                    }
                                     def df = Date.parse("yyyy-MM-ddHH:mm", priorExpireDate + "00:00") // Test it
                                     invalidExpiryDate = false // We passed it's a valid date
                                 }
@@ -817,11 +860,11 @@ def usersPage() {
                             break
 
                         case 'Scheduled':
-                        	if (!(('A'..'C').any { schedule -> settings."userDayOfWeek${schedule}${i}" })) { // If no schedules are defined
+                        	if (!(schedulesSuffix.any { schedule -> settings."userDayOfWeek${schedule}${i}" })) { // If no schedules are defined
                                 def msg = "No schedule defined!"
                                 userSummary += (userSummary ? "\n" : "") + msg
                                 userSlotActive = false
-                            } else if (!('A'..'C').any { schedule -> checkSchedule(i, schedule) }) { // Check if we are outside operating schedule
+                            } else if (!schedulesSuffix.any { schedule -> checkSchedule(i, schedule) }) { // Check if we are outside operating schedule
                                 userSlotActive = false
                             }
                         	break
@@ -986,6 +1029,9 @@ def userConfigPage(params) {
                         if (priorStartDate) {
                             //log.trace "Found start date in setup"
                             try {
+                                if (!(priorStartDate ==~ /^\d{4}\-(0[1-9]|1[012])\-(0[1-9]|[12][0-9]|3[01])$/)) { // Check for valid date format (yyyy-MM-dd)
+                                    throw new RuntimeException("Invalid date format")
+                                }
                                 def df = Date.parse("yyyy-MM-ddHH:mm", priorStartDate + "00:00") // Test it
                                 log.trace "Start:" + df.format("EEE MMM dd yyyy")
                                 invalidStartDate = false
@@ -998,6 +1044,9 @@ def userConfigPage(params) {
                         if (priorExpireDate) {
                             //log.trace "Found expiry date in setup"
                             try {
+                                if (!(priorExpireDate ==~ /^\d{4}\-(0[1-9]|1[012])\-(0[1-9]|[12][0-9]|3[01])$/)) { // Check for valid date format (yyyy-MM-dd)
+                                    throw new RuntimeException("Invalid date format")
+                                }
                                 def df = Date.parse("yyyy-MM-ddHH:mm", priorExpireDate + "00:00") // Test it
                                 log.trace "Expire:" + df.format("EEE MMM dd yyyy")
                                 invalidExpiryDate = false // We passed it's a valid date
@@ -1045,11 +1094,11 @@ def userConfigPage(params) {
                         break
 
                     case 'Scheduled':
-                        if (!(('A'..'C').any { schedule -> settings."userDayOfWeek${schedule}${i}" })) { // If no schedules are defined
+                        if (!(schedulesSuffix.any { schedule -> settings."userDayOfWeek${schedule}${i}" })) { // If no schedules are defined
                             def msg = "No schedule defined!"
                             paragraph title: msg, required: true, ""
                             userSlotActive = false
-                        } else if (!('A'..'C').any { schedule -> checkSchedule(i, schedule) }) { // Check if we are outside operating schedule
+                        } else if (!schedulesSuffix.any { schedule -> checkSchedule(i, schedule) }) { // Check if we are outside operating schedule
                             userSlotActive = false
                         }
                         break
@@ -1114,7 +1163,7 @@ def userConfigPage(params) {
             }
 
             // User Type (Permanent, One Time, Scheduled, etc)
-            input "userType${i}", "enum", title: "Select User Type", required: true, multiple: false, options: codeOptions(), defaultValue: 'Permanent', submitOnChange: true, image: "http://www.rboyapps.com/images/Schedule.png"
+            input "userType${i}", "enum", title: "Select User Type", required: true, multiple: false, options: codeOptions, defaultValue: 'Permanent', submitOnChange: true, image: "http://www.rboyapps.com/images/Schedule.png"
 
             // Expiration/Scheduling options
             switch (priorUserType) {
@@ -1135,7 +1184,7 @@ def userConfigPage(params) {
 
                 case 'Scheduled':
                     // 3 schedule options for each user
-                    ('A'..'C').each { schedule ->
+                    schedulesSuffix.each { schedule ->
                         def hrefParams = [
                             user: i as String,
                             schedule: schedule,
@@ -1241,18 +1290,7 @@ def scheduleCodesPage(params) {
                 description: "Not defined",
                 required: false,
                 multiple: true,
-                options: [
-                    'All Week',
-                    'Monday to Friday',
-                    'Saturday & Sunday',
-                    'Monday',
-                    'Tuesday',
-                    'Wednesday',
-                    'Thursday',
-                    'Friday',
-                    'Saturday',
-                    'Sunday'
-                ]
+                options: schedulingOptions
         }
     }
 }
@@ -1768,8 +1806,8 @@ def codeResponse(evt) {
         return // We're done here
     }
     
-    if ((state.lockCodes[lock.id].(user as String) != currentCode) && (type == "added")) { // We can get the notifications multiple times
-        state.lockCodes[lock.id][user as String] = currentCode
+    if ((!state.lockCodes[lock.id].(user as String) || (state.lockCodes[lock.id].(user as String) != currentCode)) && (type == "added")) { // We can get the notifications multiple times
+        state.lockCodes[lock.id][user as String] = currentCode ?: "1" // If the code doesn't exist then someone added the code externally, mark it a special code so it'll be deleted
         state.retryCodeCount[lock.id][user as String] = 0 // Reset the retry
         def msg = "Confirmed $lock added $name to user $user"
         log.info msg
@@ -1909,6 +1947,17 @@ def processUnlockEvent(evt) {
                 sendLocationEvent(name: "alarmSystemStatus", value: "off") // First do this to avoid false alerts from a slow platform
                 msg += detailedNotifications ? ", disarming Smart Home Monitor" : ""
             }
+            
+            try {
+                if (settings."adtDisarmManual${lockStr}" && settings."adtDevices") {
+                    log.info "Disarming ADT"
+                    settings."adtDevices"?.disarm() // First do this to avoid false alerts from a slow platform
+                    msg += detailedNotifications ? ", disarming ADT" : ""
+                }
+            } catch (e) { // This is still not official so lets be cautious about it
+                log.error "Error disarming ADT\n$e"
+                msg += ", error disarming ADT"
+            }
 
             if (settings."homeModeManual${lockStr}") {
                 log.info "Changing mode to ${settings."homeModeManual${lockStr}"}"
@@ -2016,8 +2065,18 @@ def processUnlockEvent(evt) {
                     case "disarmed":
                     	log.info "Disarming Smart Home Monitor"
                     	sendLocationEvent(name: "alarmSystemStatus", value: "off") // First do this to avoid false alerts from a slow platform
-                        lock.setDisarmed()
                         msg += detailedNotifications ? ", disarming Smart Home Monitor" : ""
+                        try {
+                            if (settings."adtDevices") {
+                                log.info "Disarming ADT"
+                                settings."adtDevices"?.disarm() // First do this to avoid false alerts from a slow platform
+                                msg += detailedNotifications ? ", disarming ADT" : ""
+                            }
+                        } catch (e) { // This is still not official so lets be cautious about it
+                            log.error "Error disarming ADT\n$e"
+                            msg += ", error disarming ADT"
+                        }
+                        lock.setDisarmed()
                     	break
                         
                     default:
@@ -2025,10 +2084,23 @@ def processUnlockEvent(evt) {
                         msg += ", invalid Smart Home Monitor mode ${data.armMode}"
                         break
                 }
-            } else if (settings."homeDisarm${lockStr}${user}") {
-                log.info "Disarming Smart Home Monitor"
-                sendLocationEvent(name: "alarmSystemStatus", value: "off") // First do this to avoid false alerts from a slow platform
-                msg += detailedNotifications ? ", disarming Smart Home Monitor" : ""
+            } else {
+                if (settings."homeDisarm${lockStr}${user}") {
+                    log.info "Disarming Smart Home Monitor"
+                    sendLocationEvent(name: "alarmSystemStatus", value: "off") // First do this to avoid false alerts from a slow platform
+                    msg += detailedNotifications ? ", disarming Smart Home Monitor" : ""
+                }
+                
+                try {
+                    if (settings."adtDisarm${lockStr}${user}" && settings."adtDevices") {
+                        log.info "Disarming ADT"
+                        settings."adtDevices"?.disarm() // First do this to avoid false alerts from a slow platform
+                        msg += detailedNotifications ? ", disarming ADT" : ""
+                    }
+                } catch (e) { // This is still not official so lets be cautious about it
+                    log.error "Error disarming ADT\n$e"
+                    msg += ", error disarming ADT"
+                }
             }
 
             if (settings."homeMode${lockStr}${user}") {
@@ -2289,16 +2361,36 @@ def processLockActions(evt) {
                     case "armedStay":
                     case "armedNight":
                     	log.info "Arming Smart Home Monitor to Stay"
-                        lock.setArmedStay()
                         sendLocationEvent(name: "alarmSystemStatus", value: "stay")
                         msg += detailedNotifications ? ", Arming Smart Home Monitor to Stay" : ""
+                        try {
+                            if (settings."adtDevices") {
+                                log.info "Arming ADT to Stay"
+                                settings."adtDevices"?.armStay('armedStay')
+                                msg += detailedNotifications ? ", Arming ADT to Stay" : ""
+                            }
+                        } catch (e) { // This is still not official so lets be cautious about it
+                            log.error "Error arming ADT to Stay\n$e"
+                            msg += ", error arming ADT to Stay"
+                        }
+                        lock.setArmedStay()
                     	break
                     
                     case "armedAway":
                     	log.info "Arming Smart Home Monitor to Away"
-                        lock.setArmedAway()
                         sendLocationEvent(name: "alarmSystemStatus", value: "away")
                         msg += detailedNotifications ? ", Arming Smart Home Monitor to Away" : ""
+                        try {
+                            if (settings."adtDevices") {
+                                log.info "Arming ADT to Away"
+                                settings."adtDevices"?.armAway('armedAway')
+                                msg += detailedNotifications ? ", Arming ADT to Away" : ""
+                            }
+                        } catch (e) { // This is still not official so lets be cautious about it
+                            log.error "Error arming ADT to Away\n$e"
+                            msg += ", error arming ADT to Away"
+                        }
+                        lock.setArmedAway()
                     	break
                         
                     default:
@@ -2306,15 +2398,34 @@ def processLockActions(evt) {
                     	msg += ", invalid Smart Home Monitor mode ${data.armMode}"
                         break
                 }
-            } else if (settings."homeArm${lockStr}${user}") {
-                if (settings."homeArmStay${lockStr}${user}") {
-                    log.info "Arming Smart Home Monitor to Stay"
-                    sendLocationEvent(name: "alarmSystemStatus", value: "stay")
-                    msg += detailedNotifications ? ", Arming Smart Home Monitor to Stay" : ""
-                } else {
-                    log.info "Arming Smart Home Monitor to Away"
-                    sendLocationEvent(name: "alarmSystemStatus", value: "away")
-                    msg += detailedNotifications ? ", Arming Smart Home Monitor to Away" : ""
+            } else {
+                if (settings."homeArm${lockStr}${user}") {
+                    if (settings."homeArmStay${lockStr}${user}") {
+                        log.info "Arming Smart Home Monitor to Stay"
+                        sendLocationEvent(name: "alarmSystemStatus", value: "stay")
+                        msg += detailedNotifications ? ", Arming Smart Home Monitor to Stay" : ""
+                    } else {
+                        log.info "Arming Smart Home Monitor to Away"
+                        sendLocationEvent(name: "alarmSystemStatus", value: "away")
+                        msg += detailedNotifications ? ", Arming Smart Home Monitor to Away" : ""
+                    }
+                }
+                
+                try {
+                    if (settings."adtArm${lockStr}${user}" && settings."adtDevices") {
+                        if (settings."homeArmStay${lockStr}${user}") {
+                            log.info "Arming ADT to Stay"
+                            settings."adtDevices"?.armStay('armedStay')
+                            msg += detailedNotifications ? ", Arming ADT to Stay" : ""
+                        } else {
+                            log.info "Arming ADT to Away"
+                            settings."adtDevices"?.armAway('armedAway')
+                            msg += detailedNotifications ? ", Arming ADT to Away" : ""
+                        }
+                    }
+                } catch (e) { // This is still not official so lets be cautious about it
+                    log.error "Error arming ADT\n$e"
+                    msg += ", error arming ADT"
                 }
             }
 
@@ -2396,6 +2507,17 @@ def processLockActions(evt) {
                 log.info "Arming Smart Home Monitor to Stay"
                 sendLocationEvent(name: "alarmSystemStatus", value: "stay")
                 msg += detailedNotifications ? ", Arming Smart Home Monitor to Stay" : ""
+            }
+
+            try {
+                if (settings."adtArmManual${lockStr}" && settings."adtDevices") {
+                    log.info "Arming ADT to Stay"
+                    settings."adtDevices"?.armStay('armedStay')
+                    msg += detailedNotifications ? ", Arming ADT to Stay" : ""
+                }
+            } catch (e) { // This is still not official so lets be cautious about it
+                log.error "Error arming ADT to Stay\n$e"
+                msg += ", error arming ADT to Stay"
             }
 
             if (settings."externalLockModeManual${lockStr}") {
@@ -2796,7 +2918,7 @@ def codeCheck() {
                         if (code != null) {
                             def doAdd = false
                             
-                            ('A'..'C').each { schedule ->
+                            schedulesSuffix.each { schedule ->
                                 if (checkSchedule(i, schedule)) { // Check if we are within operating schedule
                                     doAdd = true
                                     msg = "Schedule $schedule active $lock to add $name to user $user, code: $code, because it is scheduled to work between ${settings."userDayOfWeek${schedule}${i}"}: ${settings."userStartTime${schedule}${i}" ? timeToday(settings."userStartTime${schedule}${i}", timeZone).format("HH:mm z", timeZone) : ""} to ${settings."userEndTime${schedule}${i}" ? timeToday(settings."userEndTime${schedule}${i}", timeZone).format("HH:mm z", timeZone) : ""}"
@@ -3335,7 +3457,7 @@ private void sendNotifications(message, user = "") {
         }
     }
     if (settings."audioDevices${user}") {
-        settings."audioDevices${user}"*.playText(message)
+        settings."audioDevices${user}"*.playTextAndResume(message)
     }
 }
 
@@ -3431,3 +3553,5 @@ def checkForCodeUpdate(evt) {
 }
 
 // THIS IS THE END OF THE FILE
+
+
