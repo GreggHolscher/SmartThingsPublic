@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "07.07.00"
+    return "07.07.02"
 }
 
 /**
@@ -30,6 +30,7 @@ def clientVersion() {
 * Copyright RBoy Apps, redistribution or reuse of code is not allowed without permission
 *
 * Change Log:
+* 2018-8-20 - (v07.07.02) Optimized checking for app updates and improved text layout for automatic relocks
 * 2018-8-1 - (v07.07.00) Added support for Arming/disarming ADT and resume playing the audio after notifications
 * 2018-7-31 - (v07.06.07) More stingent validation for date entry format
 * 2018-7-25 - (v07.06.06) Clean up comments, make Sure Programming Engine hardier, detect is someone added a code accidentally from another app and delete it
@@ -308,21 +309,23 @@ def openCloseDoorPage() {
                 def priorOpenNotifyModes = settings."openNotifyModes${lock}"
                 def priorRelockDoorModes = settings."relockDoorModes${lock}"
                 def priorNotifyBeep = settings."openNotifyBeep${lock}"
+                def priorSensor = settings."sensor${lock}"
+                def reqDoorSensor = priorRelockImmediate || priorRetractDeadbolt || priorNotifyOpen || priorNotifyBeep
 
                 paragraph title: "Configure ${lock}", required: true, ""
                 if (priorRelockDoor || priorRetractDeadbolt || priorNotifyOpen || priorNotifyBeep) {
-                    input "sensor${lock}", "capability.contactSensor", title: "Door open/close sensor", required: ( priorRelockImmediate || priorRetractDeadbolt || priorNotifyOpen || priorNotifyBeep ? true : false) // required for deadbolt, immediate relock or notifications
+                    input "sensor${lock}", "capability.contactSensor", title: "Door open/close sensor${reqDoorSensor ? "" : " (optional)"}", required: ( reqDoorSensor ? true : false), submitOnChange: true // required for deadbolt, immediate relock or notifications
                 }
 
                 // Sanity check do not offer AutoLock is hardware autoLock is engaged
                 if (lock.hasAttribute('autolock') && (lock.latestValue("autolock") == "enabled")) {
                     paragraph title: "Disable AutoLock on physical lock to use SmartApp AutoReLock and AutoUnlock features", required: true, ""
                 } else {
-                    input "relockDoor${lock}", "bool", title: "Relock door automatically after closing", defaultValue: priorRelockDoor, required: false, submitOnChange: true
+                    input "relockDoor${lock}", "bool", title: "Relock door automatically", defaultValue: priorRelockDoor, required: false, submitOnChange: true
                     if (priorRelockDoor) {
-                        input "relockImmediate${lock}", "bool", title: "Relock immediately", defaultValue: priorRelockImmediate, required: false, submitOnChange: true
+                        input "relockImmediate${lock}", "bool", title: "Relock immediately after closing", defaultValue: priorRelockImmediate, required: false, submitOnChange: true
                         if (!priorRelockImmediate) {
-                            input "relockAfter${lock}", "number", title: "Relock after (minutes)", defaultValue: priorRelockAfter, required: true                   
+                            input "relockAfter${lock}", "number", title: "Relock after ${priorSensor ? "closing" : "unlocking"} (minutes)", defaultValue: priorRelockAfter, required: true                   
                         }
                         input "relockDoorModes${lock}", "mode", title: "...only when in this mode(s) (optional)", defaultValue: priorRelockDoorModes, required: false, multiple: true
                     }
@@ -1390,11 +1393,27 @@ def appTouch() {
         }
     }
 
-    // Check for new versions of the code
+    // Initialize when we are going to check for code version updates
+    TimeZone timeZone = location.timeZone
+    if (!timeZone) {
+        timeZone = TimeZone.getDefault()
+        log.error "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+        sendPush "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+    }
     def random = new Random()
     Integer randomHour = random.nextInt(18-10) + 10
     Integer randomDayOfWeek = random.nextInt(7-1) + 1 // 1 to 7
-    schedule("0 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
+    Calendar localCalendar = Calendar.getInstance(timeZone)
+    localCalendar.set(Calendar.DAY_OF_WEEK, randomDayOfWeek)
+    localCalendar.set(Calendar.HOUR_OF_DAY, randomHour) // Check for code updates once a week at a random day and time between 10am and 6pm
+    localCalendar.set(Calendar.MINUTE, 0)
+    localCalendar.set(Calendar.SECOND, 0)
+    localCalendar.set(Calendar.MILLISECOND, 0)
+    if (localCalendar.getTimeInMillis() < now()) { // If it's in the past add one week to it
+        localCalendar.add(Calendar.DAY_OF_YEAR, 7)
+    }
+    state.nextCodeUpdateCheck = localCalendar.getTimeInMillis()
+    log.debug "Checking for next app update after ${(new Date(state.nextCodeUpdateCheck)).format("EEE MMM dd yyyy HH:mm z", timeZone)}"
     
     // subscribe to random events to kick start timers again due to buggy platform killing the timers after a while and presence/mode events to update code states
     subscribe(location, "mode", changeHandler)
@@ -2643,7 +2662,7 @@ def clearAllCodes() {
 def codeCheck() {
     // Check if the user has upgraded the SmartApp and reinitailize if required
     if (state.clientVersion != clientVersion()) {
-        def msg = "NOTE: ${app.name} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
+        def msg = "NOTE: ${app.label} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
         log.warn msg
         startTimer(1, appTouch) // Reinitialize the app offline to avoid a loop as appTouch calls codeCheck
         sendNotifications(msg) // Do this in the end as it may timeout
@@ -3329,6 +3348,23 @@ def heartBeatMonitor() {
     if (((state.lastCheck ?: 0) + (3*60*1000)) < now()) { // Kick start the motion detection monitor if didn't update for more than 3 minutes
         log.warn "Code check hasn't been run a long time, calling it to kick start it"
         kickStart()
+    }
+
+    // We check for a code update once a week
+    TimeZone timeZone = location.timeZone
+    if (!timeZone) {
+        timeZone = TimeZone.getDefault()
+        log.error "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+        sendPush "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+    }
+    if (now() >= state.nextCodeUpdateCheck) {
+        // Before checking for code update, calculate the next time we want to check
+        state.nextCodeUpdateCheck = (state.nextCodeUpdateCheck ?: now()) + (7*24*60*60*1000) // 1 week from now
+        log.info "Checking for next app update after ${(new Date(state.nextCodeUpdateCheck)).format("EEE MMM dd yyyy HH:mm z", timeZone)}"
+        
+        checkForCodeUpdate() // Check for code updates
+    } else {
+        log.trace "Checking for next app update after ${(new Date(state.nextCodeUpdateCheck)).format("EEE MMM dd yyyy HH:mm z", timeZone)}"
     }
 }
 
