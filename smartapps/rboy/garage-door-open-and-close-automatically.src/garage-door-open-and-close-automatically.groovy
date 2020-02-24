@@ -21,45 +21,53 @@
 */ 
 
 def clientVersion() {
-    return "02.00.02"
+    return "02.02.01"
 }
 
 /*
-* Garage Door Open and Close
-*
-* Copyright RBoy Apps, redistribution or reuse of code is not allowed without permission
-*
-* Change Log
-* 2018-6-28 - (v02.00.02) Reset close time if door is closed and reopened and don't reset timer for delayed opening if multiple people arrive
-* 2018-5-14 - (v02.00.01) Version update reinitialize fix
-* 2018-4-20 - (v02.00.00) Updated to match new ST door control specifications, added timed closing options and revamped UI
-* 2018-3-21 - (v01.08.03) Don't print message about turning on switches if no switches are selected
-* 2018-2-13 - (v01.08.02) Added support for garage door control devices instead of door control devices
-* 2017-9-6 - (v01.08.00) Added support for expirations past midnight
-* 2017-7-24 - (v01.07.00) Added support for opening and closing mode selection
-* 2017-5-26 - (v01.06.02) Multiple SMS numbers are now separate by a *
-* 2017-4-29 - (v01.06.01) Patch for delayed opening of garage doors
-* 2017-4-22 - (v01.06.00) Added support for delayed opening of garage doors
-* 2016-11-5 - Added support for automatic code update notifications and fixed an issue with sms
-* 2016-10-7 - Added support for Operating Schedule for arrival and departure
-* 2016-8-17 - Added workaround for ST contact address book bug
-* 2016-8-13 - Added support for sending SMS to multiple numbers by separating them with a +
-* 2016-8-13 - Added support for contact address book from ST
-* 2016-8-13 - Added support to turn on lights when someone arrives with option of doing it when it's dark outside
-* 2016-2-14 - Only open/close doors if required and notify accordingly
-* 2016-1-16 - Description correction
-* 2016-1-16 - Added option to choose different garage doors/people for Open and Close actions
-* 2016-1-15 - Added option for notitifications
-* 2016-1-15 - Fix for missing handler
-* 2015-10-26 - Fixed incorrect display text for arriving
-* Updated 2015-2-2 - Initial release
-*
+ * Garage Door Open and Close
+ *
+ * Copyright RBoy Apps, redistribution or reuse of code is not allowed without permission
+ *
+ * Change Log
+ * 2020-01-20 - (v02.02.01) Update icons for broken ST Android app 2.18
+ * 2019-12-14 - (v02.02.00) Extend door closure when motion is detected
+ * 2019-10-11 - (v02.01.03) Add support for the new Sonos integration (auto detect)
+ * 2019-06-19 - (v02.01.02) Reset timer when motion is detected while closing garage door
+ * 2019-05-21 - (v02.01.01) Check for invalid SMS characters, day of week required to define operating schedule
+ * 2019-03-29 - (v02.01.00) Added support for checking motion for timed closures
+ * 2019-01-09 - (v02.00.06) Send closed notification if garage door was closed before the timer expired
+ * 2018-12-27 - (v02.00.05) Added icons
+ * 2018-12-21 - (v02.00.04) Added option for detailed notifications to reduce number of messages
+ * 2018-06-28 - (v02.00.02) Reset close time if door is closed and reopened and don't reset timer for delayed opening if multiple people arrive
+ * 2018-05-14 - (v02.00.01) Version update reinitialize fix
+ * 2018-04-20 - (v02.00.00) Updated to match new ST door control specifications, added timed closing options and revamped UI
+ * 2018-03-21 - (v01.08.03) Don't print message about turning on switches if no switches are selected
+ * 2018-02-13 - (v01.08.02) Added support for garage door control devices instead of door control devices
+ * 2017-09-06 - (v01.08.00) Added support for expirations past midnight
+ * 2017-07-24 - (v01.07.00) Added support for opening and closing mode selection
+ * 2017-05-26 - (v01.06.02) Multiple SMS numbers are now separate by a *
+ * 2017-04-29 - (v01.06.01) Patch for delayed opening of garage doors
+ * 2017-04-22 - (v01.06.00) Added support for delayed opening of garage doors
+ * 2016-11-05 - Added support for automatic code update notifications and fixed an issue with sms
+ * 2016-10-07 - Added support for Operating Schedule for arrival and departure
+ * 2016-08-17 - Added workaround for ST contact address book bug
+ * 2016-08-13 - Added support for sending SMS to multiple numbers by separating them with a +
+ * 2016-08-13 - Added support for contact address book from ST
+ * 2016-08-13 - Added support to turn on lights when someone arrives with option of doing it when it's dark outside
+ * 2016-02-14 - Only open/close doors if required and notify accordingly
+ * 2016-01-16 - Description correction
+ * 2016-01-16 - Added option to choose different garage doors/people for Open and Close actions
+ * 2016-01-15 - Added option for notitifications
+ * 2016-01-15 - Fix for missing handler
+ * 2015-10-26 - Fixed incorrect display text for arriving
+ * 2015-02-02 - Initial release
 */
 definition(
     name: "Garage Door Open and Close Automatically",
     namespace: "rboy",
     author: "RBoy Apps",
-    description: "Open a garage door when someone arrives, Close a garage door when someone leaves or after a specified time",
+    description: "Open/close a garage door when someone arrives/leaves or after a specified time and execute actions",
     category: "Convenience",
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Meta/garage_contact.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Meta/garage_contact@2x.png")
@@ -73,25 +81,30 @@ preferences {
 }
 
 def mainPage() {
-    dynamicPage(name: "mainPage", title: "Garage Door Open and Close Automatically when People Arrive/Leave v${clientVersion()}", install: true, uninstall: true) {    
+    dynamicPage(name: "mainPage", title: "Garage Door Open and Close Automatically v${clientVersion()}", install: true, uninstall: true) {
         section("Opening Garage Door(s)") {
-            href(name: "arrival", title: "Open when people arrive", page: "arrivalPage", description: (arrives && doorsOpen) ? "Configured" : "Not configured", required: false)
+            href(name: "arrival", title: "Open when people arrive", page: "arrivalPage", description: (arrives && doorsOpen) ? "Configured" : "Not configured", required: false, image: "https://www.rboyapps.com/images/GarageOpen.png")
         }
         
         section("Closing Garage Door(s)") {
-            href(name: "leave", title: "Close when people leave", page: "leavePage", description: (leaves && doorsClose) ? "Configured" : "Not configured", required: false)
-            href(name: "close", title: "Close when left open", page: "closePage", description: (doorsCloseTimed && closeTimed) ? "Configured" : "Not configured", required: false)
+            href(name: "leave", title: "Close when people leave", page: "leavePage", description: (leaves && doorsClose) ? "Configured" : "Not configured", required: false, image: "https://www.rboyapps.com/images/GarageClosed.png")
+            href(name: "close", title: "Close when left open", page: "closePage", description: (doorsCloseTimed && closeTimed) ? "Configured" : "Not configured", required: false, image: "https://www.rboyapps.com/images/GarageClosedTimer.png")
         }
         section("Notifications") {
-            input("recipients", "contact", title: "Send notifications to (optional)", multiple: true, required: false) {
-                paragraph "You can enter multiple phone numbers to send an SMS to by separating them with a '*'. E.g. 5551234567*4447654321"
-                input "sms", "phone", title: "Send SMS to (phone number)", required: false
-                input "push", "bool", title: "Send push notification", defaultValue: "true"
+            input("recipients", "contact", title: "Send notifications to", multiple: true, required: false, image: "https://www.rboyapps.com/images/Notifications.png") {
+                paragraph "You can enter multiple phone numbers by separating them with a '*'\nE.g. 5551234567*+18747654321"
+                input "sms", "phone", title: "Send SMS notification to", required: false, image: "https://www.rboyapps.com/images/Notifications.png"
+                input "push", "bool", title: "Send push notifications", defaultValue: true, required: false, image: "https://www.rboyapps.com/images/PushNotification.png"
             }
+            input "audioDevices", "capability.audioNotification", title: "Speak notifications on", required: false, multiple: true, submitOnChange: true, image: "https://www.rboyapps.com/images/Horn.png"
+            if (audioDevices) {
+                input "audioVolume", "number", title: "...at this volume level (optional)", description: "keep current", required: false, range: "1..100"
+            }
+            input "detailedNotifications", "bool", title: "Send detailed notifications", defaultValue: false, required: false
         }
         section() {
             label title: "Assign a name for this SmartApp (optional)", required: false
-            input name: "disableUpdateNotifications", title: "Don't check for new versions of the app", type: "bool", required: false
+            input "updateNotifications", "bool", title: "Check for new versions of the app", defaultValue: true, required: false
         }
     }
 }
@@ -106,7 +119,7 @@ def arrivalPage() {
             if (arriveSwitches) {
                 input "arriveAfterDark", "bool", title: "...only if it's getting dark outside", description: "Turn on lights at night", required: false
             }
-            input name: "openModes", type: "mode", title: "...only when in this mode(s)", required: false, multiple: true
+            input "openModes", "mode", title: "...only when in this mode(s)", required: false, multiple: true
             
             def hrefParams = [user: "A", schedule: 0 as String, passed: true] // use as String otherwise it won't work on Android
             href name: "arrivalSchedule", params: hrefParams, title: "...only during this schedule", page: "schedulePage", description: scheduleDesc(hrefParams.user, hrefParams.schedule), required: false
@@ -119,7 +132,8 @@ def leavePage() {
         section() {
             input "leaves", "capability.presenceSensor", title: "When one of these leave", description: "Which people leave?", multiple: true, required: false
             input "doorsClose", "capability.doorControl", title: "Close these garage door(s)?", required: false, multiple: true
-            input name: "closeModes", type: "mode", title: "...only when in this mode(s)", required: false, multiple: true
+            input "leaveXPeople", "capability.motionSensor", title: "...when no motion is detected", required: false, multiple: true
+            input "closeModes", "mode", title: "...only when in this mode(s)", required: false, multiple: true
 
             def hrefParams = [user: "B", schedule: 0 as String, passed: true] // use as String otherwise it won't work on Android
             href name: "leaveSchedule", params: hrefParams, title: "...only during this schedule", page: "schedulePage", description: scheduleDesc(hrefParams.user, hrefParams.schedule), required: false 
@@ -131,26 +145,15 @@ private scheduleDesc(schedule, i) {
     TimeZone timeZone = location.timeZone
     if (!timeZone) {
         timeZone = TimeZone.getDefault()
-        log.error "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
-        sendPush "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+        def msg = "Hub geolocation not set, using ${timeZone.getDisplayName()} timezone. Use the SmartThings app to set the Hub geolocation to identify the correct timezone."
+        log.error msg
+        sendPush msg
         section("INVALID HUB LOCATION") {
-            paragraph title: "Hub location/timezone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the app to work properly", required: true, ""
+            paragraph title: msg, required: true, ""
         }
     }
 
-    def retVal = "Everyday"
-    if (settings."userDayOfWeek${schedule}${i}") {
-        retVal = ""
-        settings."userDayOfWeek${schedule}${i}".each { retVal += (retVal ? ", " : "") + it }// DOW
-    }
-    if (settings."userStartTime${schedule}${i}" && settings."userEndTime${schedule}${i}") {
-        retVal += ": " + (settings."userStartTime${schedule}${i}" ? timeToday(settings."userStartTime${schedule}${i}", timeZone).format("HH:mm z", timeZone) : "") // Start Time
-        retVal += " - " + (settings."userEndTime${schedule}${i}" ? timeToday(settings."userEndTime${schedule}${i}", timeZone).format("HH:mm z", timeZone) : "") // EndTime
-    } else {
-        retVal = "Anytime"
-    }
-    
-    return retVal
+    return (settings."userDayOfWeek${schedule}${i}" ? "${settings."userDayOfWeek${schedule}${i}"}: ${settings."userStartTime${schedule}${i}" ? (new Date(timeToday(settings."userStartTime${schedule}${i}", timeZone).time)).format("HH:mm z", timeZone) : ""} - ${settings."userEndTime${schedule}${i}" ? (new Date(timeToday(settings."userEndTime${schedule}${i}", timeZone).time)).format("HH:mm z", timeZone) : ""}" : "Not defined")
 }
 
 def schedulePage(params) {
@@ -195,9 +198,10 @@ def schedulePage(params) {
         section("Operating Schedule (optional)") {
             input "userStartTime${usr}${i}", "time", title: "Start Time", required: false
             input "userEndTime${usr}${i}", "time", title: "End Time", required: false
-            input name: "userDayOfWeek${usr}${i}",
-                type: "enum",
+            input "userDayOfWeek${usr}${i}",
+                "enum",
                 title: "Which day of the week?",
+                description: "Not defined",
                 required: false,
                 multiple: true,
                 options: [
@@ -222,7 +226,8 @@ def closePage() {
         section() {
             input "doorsCloseTimed", "capability.doorControl", title: "Close these garage door(s)?", required: false, multiple: true
             input "closeTimed", "number", title: "Close after (minutes)", description: "Close if left open", range: "1..*", required: false
-            input name: "closeModesTimed", type: "mode", title: "...only when in this mode(s)", required: false, multiple: true
+            input "closeXPeople", "capability.motionSensor", title: "...when no motion is detected", required: false, multiple: true
+            input "closeModesTimed", "mode", title: "...only when in this mode(s)", required: false, multiple: true
 
             def hrefParams = [user: "C", schedule: 0 as String, passed: true] // use as String otherwise it won't work on Android
             href name: "closeSchedule", params: hrefParams, title: "...only during this schedule", page: "schedulePage", description: scheduleDesc(hrefParams.user, hrefParams.schedule), required: false 
@@ -253,6 +258,7 @@ def initialize() {
     subscribe(arrives, "presence.present", arriveHandler)
     subscribe(leaves, "presence.not present", leaveHandler)
     subscribe(doorsCloseTimed, "door", timedDoorHandler)
+    subscribe(closeXPeople, "motion", timedDoorMotionHandler)
 
     // Our handler runs every minute to check for pending actions
     schedule("? 0/1 * * * ?", pendingActions)
@@ -261,7 +267,7 @@ def initialize() {
     def random = new Random()
     Integer randomHour = random.nextInt(18-10) + 10
     Integer randomDayOfWeek = random.nextInt(7-1) + 1 // 1 to 7
-    schedule("0 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
+    schedule("* 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
 }
 
 private getScheduledList() { atomicState.scheduledList = atomicState.scheduledList ?: [:] } // Get list of pending door closures
@@ -269,7 +275,9 @@ private getScheduledList() { atomicState.scheduledList = atomicState.scheduledLi
 def pendingActions() {
     log.trace "Pending actions: $scheduledList"
     
-    versionCheck()
+    if (versionCheck()) {
+        return
+    }
 
     scheduledList.each { dni, timestamp ->
         if (timestamp) { // If we have a valid timestamp for the device
@@ -285,10 +293,40 @@ def pendingActions() {
     }
 }
 
+def timedDoorMotionHandler(evt) {
+    log.debug "TimedDoorMotionHandler $evt.displayName, $evt.name: $evt.value"
+
+    if (versionCheck()) {
+        return
+    }
+    
+    def msg = ""
+    if (evt.value == "active") {
+        def sensor = evt.displayName
+        def doors = []
+        scheduledList.each { dni, timestamp -> // Cycle through pending door close actions and reset them
+            if (timestamp) { // If we have a pending action
+                doors << doorsCloseTimed.find { it.deviceNetworkId == dni }
+                atomicState.scheduledList = (scheduledList << [(dni):(now() + (closeTimed * 60 * 1000))]) // Reset when to close door (keep only the latest open)
+            }
+        }
+        if (doors) {
+            msg += "Motion detected from $sensor, closing ${doors*.displayName.join(", ")} in $closeTimed minutes"
+        }
+    }
+        
+    if (msg) {
+        log.info(msg)
+        sendNotifications(msg)
+    }
+}
+
 def timedDoorHandler(evt) {
     log.debug "TimedDoorHandler $evt.displayName, $evt.name: $evt.value"
 
-    versionCheck()
+    if (versionCheck()) {
+        return
+    }
     
     def msg = ""
     if (evt.value == "open") {
@@ -297,19 +335,22 @@ def timedDoorHandler(evt) {
             return
         }
         
-        if (!checkSchedule(0, "C")) { // Check if we are within operating Schedule to operating things
+        if (settings."userDayOfWeek${"C"}${0}" && !checkSchedule(0, "C")) { // Check if we are within operating Schedule to operating things
             log.warn "Out of operating schedules, skipping closing door after timeout"
             return
         }
 
         if (closeTimed) {
-            msg += "$evt.displayName opened, closing garage door in $closeTimed minutes"
+            msg += "$evt.displayName opened, closing garage door in $closeTimed minute(s)"
             atomicState.scheduledList = (scheduledList << [(evt.device.deviceNetworkId):(now() + (closeTimed * 60 * 1000))]) // When to close door (keep only the latest open)
         }
     } else if (evt.value == "closed") { // If it's closed then reset the timer if present
         if (closeTimed) {
             log.trace "$evt.displayName closed, resetting close timer"
             atomicState.scheduledList = (scheduledList << [(evt.device.deviceNetworkId):null]) // Reset
+            if (detailedNotifications) {
+                msg += "$evt.displayName closed"
+            }
         }
     }
         
@@ -326,16 +367,29 @@ def timedCloseDoors(data) {
     log.trace "Garage door: $door.displayName"
 
     def msg = ""
+    def resetTimer = false
     
     if (door.currentDoor != "closed") {
-        msg += "$closeTimed minutes over, closing $door"
-        door.close()
+        def sensor = closeXPeople.find { it.currentValue("motion") == "active" }
+        if (sensor) { // Check if any motion sensors are reporting active to prevent closure
+            msg += "Motion detected from $sensor, closing $door in $closeTimed minutes"
+            resetTimer = true
+        } else {
+            if (detailedNotifications) {
+                msg += "$closeTimed minutes over, closing $door"
+            }
+            door.close()
+        }
     } else {
         log.trace "$closeTimed minutes over, $door already closed"
     }
     
     // Stop tracking it
-    atomicState.scheduledList = (scheduledList << [(door.deviceNetworkId):null]) // Reset it
+    if (resetTimer) {
+        atomicState.scheduledList = (scheduledList << [(door.deviceNetworkId):(now() + (closeTimed * 60 * 1000))]) // When to close door (keep only the latest open)
+    } else {
+        atomicState.scheduledList = (scheduledList << [(door.deviceNetworkId):null]) // Reset it
+    }
 
     if (msg) {
         log.info(msg)
@@ -349,19 +403,29 @@ def delayOpenDoors(data) {
     def device = arrives.find { it.deviceNetworkId == data.deviceNetworkId }
     log.trace "Presence sensor: $device.displayName"
     
-    def msg = "$delayOpenDoors seconds over"
+    def msg = ""
     
     if (device.currentPresence != "present") {
-        msg += ", $device.displayName not present, skipping opening doors"
+        if (detailedNotifications) {
+            msg += ", $device.displayName not present, skipping opening doors"
+        }
     } else {
-        for(door in doorsOpen) {
+        for (door in doorsOpen) {
             if (door.currentDoor == "closed") {
-                msg += ", opening $door"
+                if (detailedNotifications) {
+                    msg += ", opening $door"
+                }
                 door.open()
             } else {
-                msg += ", $door already open"
+                if (detailedNotifications) {
+                    msg += ", $door already open"
+                }
             }
         }
+    }
+    
+    if (msg) { // If we have a message
+        msg = "$delayOpenDoors seconds over" + msg
     }
 
     log.debug(msg)
@@ -371,32 +435,38 @@ def delayOpenDoors(data) {
 def arriveHandler(evt) {
     log.debug "arriveHandler $evt.displayName, $evt.name: $evt.value"
     
-    versionCheck()
+    if (versionCheck()) {
+        return
+    }
 
     if (openModes ? !openModes.find{it == location.mode} : false) { // Check if we are within operating modes
         log.warn "Out of operating mode, skipping arrival handling"
         return
     }
     
-    if (!checkSchedule(0, "A")) { // Check if we are within operating Schedule to operating things
+    if (settings."userDayOfWeek${"A"}${0}" && !checkSchedule(0, "A")) { // Check if we are within operating Schedule to operating things
         log.warn "Out of operating schedules, skipping arrival handling"
         return
     }
 
-    def msg = "$evt.displayName arrived"
+    def msg = ""
     
     if (doorsOpenDelay) {
-        msg += ", opening doors after $doorsOpenDelay seconds"
         if (canSchedule()) { // ST only allows 6 schedules overall
+            msg += ", opening doors after $doorsOpenDelay seconds"
             runIn(doorsOpenDelay, "delayOpenDoors", [data: [deviceNetworkId: evt.device.deviceNetworkId, type: evt.value], overwrite: false]) // If multiple people arrive take the first one
+        } else {
+            log.error "ERROR: Unable to schedule opening doors after $doorsOpenDelay seconds, not enough schedules available"
         }
     } else {
-        for(door in doorsOpen) {
+        for (door in doorsOpen) {
             if (door.currentDoor == "closed") {
                 msg += ", opening $door"
                 door.open()
             } else {
-                msg += ", $door already open"
+                if (detailedNotifications) {
+                    msg += ", $door already open"
+                }
             }
         }
     }
@@ -414,6 +484,10 @@ def arriveHandler(evt) {
         msg += ", turning on $arriveSwitches"
     }
 
+    if (msg) { // If we have a message
+        msg = "$evt.displayName arrived" + msg
+    }
+
     log.debug(msg)
     sendNotifications(msg)
 }
@@ -421,28 +495,41 @@ def arriveHandler(evt) {
 def leaveHandler(evt) {
     log.debug "leaveHandler $evt.displayName, $evt.name: $evt.value"
     
-    versionCheck()
+    if (versionCheck()) {
+        return
+    }
 
     if (closeModes ? !closeModes.find{it == location.mode} : false) { // Check if we are within operating modes
         log.warn "Out of operating mode, skipping departure handling"
         return
     }
     
-    if (!checkSchedule(0, "B")) { // Check if we are within operating Schedule to operating things
+    if (settings."userDayOfWeek${"B"}${0}" && !checkSchedule(0, "B")) { // Check if we are within operating Schedule to operating things
         log.warn "Out of operating schedules, skipping departure handling"
         return
     }
 
-    def msg = "$evt.displayName left"
-    for(door in doorsClose) {
-        if (door.currentDoor == "open") {
-            msg += ", closing $door"
-            door.close()
-        } else {
-            msg += ", $door already closed"
+    def msg = ""
+    def sensor = leaveXPeople.find { it.currentValue("motion") == "active" }
+    if (sensor) { // Check if any motion sensors are reporting active to prevent closure
+        msg += ", motion detected from $sensor, not closing $doorsClose"
+    } else {
+        for (door in doorsClose) {
+            if (door.currentDoor == "open") {
+                msg += ", closing $door"
+                door.close()
+            } else {
+                if (detailedNotifications) {
+                    msg += ", $door already closed"
+                }
+            }
         }
     }
     
+    if (msg) { // If we have a message
+        msg = "$evt.displayName left" + msg
+    }
+
     log.debug(msg)
     sendNotifications(msg)
 }
@@ -450,24 +537,34 @@ def leaveHandler(evt) {
 private versionCheck() {
     // Check if the user has upgraded the SmartApp and reinitailize if required
     if (state.clientVersion != clientVersion()) {
-        def msg = "NOTE: ${app.name} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
+        def msg = "NOTE: ${app.label} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
         log.warn msg
         runIn(1, initialize) // Reinitialize the app offline
         sendNotifications(msg) // Do this in the end as it may timeout
-        return
-    }   
+        return true
+    }
+    
+    return false
 }
 
 private void sendText(number, message) {
     if (number) {
-        def phones = number.split("\\*")
+        def phones = number.replaceAll("[;,#]", "*").split("\\*") // Some users accidentally use ;,# instead of * and ST can't handle *,#+ in the number except for + at the beginning
         for (phone in phones) {
-            sendSms(phone, message)
+            try {
+                sendSms(phone, message)
+            } catch (Exception e) {
+                sendPush "Invalid phone number $phone"
+            }
         }
     }
 }
 
 private void sendNotifications(message) {
+	if (!message) {
+		return
+    }
+    
     if (location.contactBookEnabled) {
         sendNotificationToContacts(message, recipients)
     } else {
@@ -480,34 +577,51 @@ private void sendNotifications(message) {
             sendText(sms, message)
         }
     }
+
+    audioDevices?.each { audioDevice -> // Play audio notifications
+        if (audioDevice.hasCommand("playText")) { // Check if it supports TTS
+            if (audioVolume) { // Only set volume if defined as it also resumes playback
+                audioDevice.playTextAndResume(message, audioVolume)
+            } else {
+                audioDevice.playText(message)
+            }
+        } else {
+            if (audioVolume) { // Only set volume if defined as it also resumes playback
+                audioDevice.playTrackAndResume(textToSpeech(message)?.uri, audioVolume) // No translations at this time
+            } else {
+                audioDevice.playTrack(textToSpeech(message)?.uri) // No translations at this time
+            }
+        }
+    }
 }
 
 // Checks if we are within the current operating scheduled
 // Inputs to the function are user (i) and schedule (x) (there can be multiple schedules)
 // Preferences required in user input settings are:
-// settings."userStartTime${x}${i}"
-// settings."userEndTime${x}${i}"
-// settings."userDayOfWeek${x}${i}"
+// settings."userStartTime${x}${i}" - optional
+// settings."userEndTime${x}${i}" - optional
+// settings."userDayOfWeek${x}${i}" - required
 private checkSchedule(def i, def x) {
-    log.trace("Checking operating schedule $x for user $i")
+    log.trace "Checking operating schedule $x for user $i"
 
     TimeZone timeZone = location.timeZone
     if (!timeZone) {
         timeZone = TimeZone.getDefault()
-        log.error "Hub timeZone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
-        sendPush "Hub timeZone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+        def msg = "Hub geolocation not set, using ${timeZone.getDisplayName()} timezone. Use the SmartThings app to set the Hub geolocation to identify the correct timezone."
+        log.error msg
+        sendPush msg
     }
 
     def doChange = false
-    Calendar localCalendar = Calendar.getInstance(timeZone);
-    int currentDayOfWeek = localCalendar.get(Calendar.DAY_OF_WEEK);
+    Calendar localCalendar = Calendar.getInstance(timeZone)
+    int currentDayOfWeek = localCalendar.get(Calendar.DAY_OF_WEEK)
     def currentDT = new Date(now())
 
     // some debugging in order to make sure things are working correclty
     log.trace "Current time: ${currentDT.format("EEE MMM dd yyyy HH:mm z", timeZone)}"
 
     // Check if we are within operating times
-    if (settings."userStartTime${x}${i}" != null && settings."userEndTime${x}${i}" != null) {
+    if (settings."userStartTime${x}${i}" && settings."userEndTime${x}${i}") {
         def scheduledStart = timeToday(settings."userStartTime${x}${i}", timeZone)
         def scheduledEnd = timeToday(settings."userEndTime${x}${i}", timeZone)
 
@@ -516,29 +630,29 @@ private checkSchedule(def i, def x) {
             //log.trace "Local hour is $localHour"
             if (( localHour >= 0) && (localHour < 12)) // If we between midnight and midday
             {
-                log.debug "End time is before start time and we are past midnight, assuming start time is previous day"
+                log.trace "End time is before start time and we are past midnight, assuming start time is previous day"
                 scheduledStart = scheduledStart.previous() // Get the start time for yesterday
             } else {
-                log.debug "End time is before start time and we are past midday, assuming end time is the next day"
+                log.trace "End time is before start time and we are past midday, assuming end time is the next day"
                 scheduledEnd = scheduledEnd.next() // Get the end time for tomorrow
             }
         }
 
-        log.trace("Operating Start ${scheduledStart.format("EEE MMM dd yyyy HH:mm z", timeZone)}, End ${scheduledEnd.format("EEE MMM dd yyyy HH:mm z", timeZone)}")
+        log.trace "Operating Start ${scheduledStart.format("HH:mm z", timeZone)}, End ${scheduledEnd.format("HH:mm z", timeZone)}"
 
         if (currentDT < scheduledStart || currentDT > scheduledEnd) {
-            log.info("Outside operating time schedule")
+            log.debug "Outside operating time schedule"
             return false
         }
     }
 
     // Check the condition under which we want this to run now
     // This set allows the most flexibility.
-    log.trace("Operating DOW(s): ${settings."userDayOfWeek${x}${i}"}")
+    log.trace "Operating DOW(s): ${settings."userDayOfWeek${x}${i}"}"
 
-    if(settings."userDayOfWeek${x}${i}" == null) {
-        log.warn "Day of week not specified for operating schedule $x for user $i, assuming no schedule set, so we are within schedule"
-        return true
+    if(!settings."userDayOfWeek${x}${i}") {
+        log.debug "Day of week not specified for operating schedule $x for user $i"
+        return false
     } else if(settings."userDayOfWeek${x}${i}".contains('All Week')) {
         doChange = true
     } else if((settings."userDayOfWeek${x}${i}".contains('Monday') || settings."userDayOfWeek${x}${i}".contains('Monday to Friday')) && currentDayOfWeek == Calendar.instance.MONDAY) {
@@ -557,19 +671,18 @@ private checkSchedule(def i, def x) {
         doChange = true
     }
 
-
     // If we have hit the condition to schedule this then lets do it
     if(doChange == true){
-        log.info("Within operating schedule")
+        log.debug("Within operating schedule")
         return true
     }
     else {
-        log.info("Outside operating schedule")
+        log.debug("Outside operating schedule")
         return false
     }
 }
 
-def checkForCodeUpdate(evt) {
+def checkForCodeUpdate(evt = null) {
     log.trace "Getting latest version data from the RBoy Apps server"
     
     def appName = "Garage Door Open and Close Automatically when People Arrive/Leave"
@@ -594,7 +707,7 @@ def checkForCodeUpdate(evt) {
                 if (appVersion > clientVersion()) {
                     def msg = "New version of app ${app.label} available: $appVersion, current version: ${clientVersion()}.\nPlease visit $serverUrl to get the latest version."
                     log.info msg
-                    if (!disableUpdateNotifications) {
+                    if (updateNotifications != false) { // The default true may not be registered
                         sendPush(msg)
                     }
                 } else {
@@ -610,9 +723,9 @@ def checkForCodeUpdate(evt) {
                             def deviceName = device?.currentValue("dhName")
                             def deviceVersion = ret.data?."$deviceName"
                             if (deviceVersion && (deviceVersion > device?.currentValue("codeVersion"))) {
-                                def msg = "New version of device ${device?.displayName} available: $deviceVersion, current version: ${device?.currentValue("codeVersion")}.\nPlease visit $serverUrl to get the latest version."
+                                def msg = "New version of device handler for ${device?.displayName} available: $deviceVersion, current version: ${device?.currentValue("codeVersion")}.\nPlease visit $serverUrl to get the latest version."
                                 log.info msg
-                                if (!disableUpdateNotifications) {
+                                if (updateNotifications != false) { // The default true may not be registered
                                     sendPush(msg)
                                 }
                             } else {

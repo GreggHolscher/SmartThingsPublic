@@ -21,17 +21,24 @@
 */ 
 
 def clientVersion() {
-    return "01.02.00"
+    return "01.05.01"
 }
 
 /**
-*  Low Battery Monitor and Notification
-*
-* Copyright RBoy Apps, redistribution of any changes or code is not allowed without permission
-* 2017-5-15 - (v.01.02.00) Added support for notifying if devices don't report battery status within XX days, separate multiple SMS numbers with a *
-* 2016-11-5 - Added support for automatic code update notifications and fixed an issue with sms
-* 2016-10-11 - Initial Release
-*/
+ *  Low Battery Monitor and Notification
+ *
+ * Copyright RBoy Apps, redistribution of any changes or code is not allowed without permission
+ * 2020-01-20 - (v01.05.01) Update icons for broken ST Android app 2.18
+ * 2019-10-16 - (v01.05.00) Added support for day of week selection, improved settings update reliability/performance
+ * 2019-10-11 - (v01.04.00) Add support for the new Sonos integration (auto detect)
+ * 2019-06-24 - (v01.03.03) Don't resume playback if no audio volume is specified
+ * 2019-06-07 - (v01.03.02) Added support for silent push, sanity checking for multiple SMS
+ * 2019-02-28 - (v01.03.01) Show invalid battery as unknown instead of null
+ * 2018-01-28 - (v01.03.00) Patch for slow ST server causing settings not to be reflected in real time, added support for audio notifications
+ * 2017-05-15 - (v01.02.00) Added support for notifying if devices don't report battery status within XX days, separate multiple SMS numbers with a *
+ * 2016-11-05 - Added support for automatic code update notifications and fixed an issue with sms
+ * 2016-10-11 - Initial Release
+ */
 
 definition(
     name: "Low Battery Monitor and Notification",
@@ -39,8 +46,8 @@ definition(
     author: "RBoy Apps",
     description: "Monitor devices battery and send notifications when they reach various thresholds",
     category: "Safety & Security",
-    iconUrl: "http://smartthings.rboyapps.com/images/BatteryAlert.png",
-    iconX2Url: "http://smartthings.rboyapps.com/images/BatteryAlert.png"
+    iconUrl: "https://www.rboyapps.com/images/BatteryAlert.png",
+    iconX2Url: "https://www.rboyapps.com/images/BatteryAlert.png"
 )
 
 preferences {
@@ -48,9 +55,23 @@ preferences {
     page(name: "newMonitorRulePage")
 }
 
+private getSchedulingOptions() {
+    [
+        "${Calendar.MONDAY}${Calendar.TUESDAY}${Calendar.WEDNESDAY}${Calendar.THURSDAY}${Calendar.FRIDAY}${Calendar.SATURDAY}${Calendar.SUNDAY}": 'All Week',
+        "${Calendar.MONDAY}${Calendar.TUESDAY}${Calendar.WEDNESDAY}${Calendar.THURSDAY}${Calendar.FRIDAY}": 'Monday to Friday',
+        "${Calendar.SATURDAY}${Calendar.SUNDAY}": 'Saturday & Sunday',
+        "${Calendar.MONDAY}": 'Monday',
+        "${Calendar.TUESDAY}": 'Tuesday',
+        "${Calendar.WEDNESDAY}": 'Wednesday',
+        "${Calendar.THURSDAY}": 'Thursday',
+        "${Calendar.FRIDAY}": 'Friday',
+        "${Calendar.SATURDAY}": 'Saturday',
+        "${Calendar.SUNDAY}": 'Sunday'
+    ]
+}
 
 def setupAppPage() {
-    log.trace "Settings $settings"
+    log.trace "Settings $settings\nDOW Options: ${schedulingOptions.inspect()}"
 
     dynamicPage(name: "setupAppPage", title: "Low Battery Monitor and Notification v${clientVersion()}", install: true, uninstall: true) {    
         if (!atomicState.rules) {
@@ -74,12 +95,15 @@ def setupAppPage() {
                     atomicState.rules = rules
                     log.info "Deleted rule ${rule.index}"
                     // Now get rid of the rules in the settings
-                    deleteSetting("batteryUpper${rule.index}")
-                    deleteSetting("monitorDevices${rule.index}")
-                    deleteSetting("monitorDevicesReporting${rule.index}")
-                    deleteSetting("monitorDevicesReportingDays${rule.index}")
-                    deleteSetting("deleteRule${rule.index}")
-                    deleteSetting("name${rule.index}")
+                    def map = [
+                        "batteryUpper${rule.index}",
+                        "monitorDevices${rule.index}",
+                        "monitorDevicesReporting${rule.index}",
+                        "monitorDevicesReportingDays${rule.index}",
+                        "deleteRule${rule.index}",
+                        "name${rule.index}",
+                    ]
+                    deleteSettings(map)
                     log.trace "Updated Settings $settings"
                     log.trace "Updated Rules " + atomicState.rules
                 } else { // Otherwise show it
@@ -94,21 +118,29 @@ def setupAppPage() {
                 rule: [index:now() as String], // Create a new rule to use (by default we'll delete this rule and settings unless the user confirms), use as String otherwise it won't work on Android
                 passed: true 
             ]
-            href(name: "NewMonitorRule", params: hrefParams, title: "+ Define a new battery monitor rule", page: "newMonitorRulePage", description: "", required: false)
+            href(name: "NewMonitorRule", params: hrefParams, title: "+ Add a new battery monitor rule", page: "newMonitorRulePage", description: "", required: false)
         }
 
         section("Notification Options") {
-            input "time", "time", title: "Check battery levels at this time everyday", required: true
+            input "time", "time", title: "Check battery levels at this time everyday", required: true, image: "https://www.rboyapps.com/images/Time.png"
+            input "dayOfWeek", "enum", title: "Which day of the week?", description: "Everyday", required: false, multiple: true, options: schedulingOptions
+            input "audioDevices", "capability.audioNotification", title: "Speak notifications on", required: false, multiple: true, submitOnChange: true, image: "https://www.rboyapps.com/images/Horn.png"
+            if (audioDevices) {
+                input "audioVolume", "number", title: "...at this volume level (optional)", description: "keep current", required: false, range: "1..100"
+            }
             input("recipients", "contact", title: "Send notifications to", multiple: true, required: false) {
-                paragraph "You can enter multiple phone numbers to send an SMS to by separating them with a '*'. E.g. 5551234567*4447654321"
-                input name: "sms", title: "Send SMS notification to (optional):", type: "phone", required: false
-                input name: "notify", title: "Send Push Notification", type: "bool", defaultValue: true
+                input "notify", "bool", title: "Push notifications", required: false, image: "https://www.rboyapps.com/images/PushNotification.png", submitOnChange: true
+                if (!notify) {
+                    input "silentPush", "bool", title: "Silent notifications", required: false, image: "https://www.rboyapps.com/images/SilentNotification.png"
+                }
+                input "sms", "phone", title: "Send SMS notification to", required: false, image: "https://www.rboyapps.com/images/Notifications.png"
+                paragraph "You can enter multiple phone numbers by separating them with a '*'. E.g. 5551234567*+18747654321"
             }
         }
 
         section() {
             label title: "Assign a name for this SmartApp (optional)", required: false
-            input name: "disableUpdateNotifications", title: "Don't check for new versions of the app", type: "bool", required: false
+            input name: "updateNotifications", title: "Check for new versions of the app", type: "bool", defaultValue: true, required: false
         }
     }
 }
@@ -199,14 +231,17 @@ def updated() {
 def initialize() {
     log.trace "Initializing settings with rules $atomicState.rules"
 
+    state.clientVersion = clientVersion() // Update our local stored client version to detect code upgrades
+    
     unsubscribe()
     unschedule()
     
     TimeZone timeZone = location.timeZone
     if (!timeZone) {
         timeZone = TimeZone.getDefault()
-        log.error "Hub timeZone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
-        sendPush "Hub timeZone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+        def msg = "Hub geolocation not set, using ${timeZone.getDisplayName()} timezone. Use the SmartThings app to set the Hub geolocation to identify the correct timezone."
+        log.error msg
+        sendPush msg
     }
     
     // Subscribe to battery events to check for devices that may have stopped reporting
@@ -236,14 +271,14 @@ def initialize() {
     def random = new Random()
     Integer randomHour = random.nextInt(18-10) + 10
     Integer randomDayOfWeek = random.nextInt(7-1) + 1 // 1 to 7
-    schedule("0 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
+    schedule("* 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
 
-    checkBatteryLevels() // Do it now for sanity check
+    checkBatteryLevels(true) // Do it now for sanity check
 }
 
 def appTouchMethod(evt) {
     log.debug "User requested battery level check"
-    checkBatteryLevels()
+    checkBatteryLevels(true)
 }
 
 def batteryEventHandler(evt) {
@@ -256,16 +291,35 @@ def batteryEventHandler(evt) {
     //log.debug atomicState.batteryEvents
 }
 
-def checkBatteryLevels() {
-    log.trace "Checking battery levels"
+def checkBatteryLevels(force = false) {
+    log.trace "Checking battery levels, force: $force"
 
+    // Check if the user has upgraded the SmartApp and reinitailize if required
+    if (state.clientVersion != clientVersion()) {
+        def msg = "NOTE: ${app.label} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
+        log.warn msg
+        runIn(1, initialize) // Reinitialize the app offline to avoid a loop as appTouch calls codeCheck
+        sendNotifications(msg) // Do this in the end as it may timeout
+        return
+    }
+    
     TimeZone timeZone = location.timeZone
     if (!timeZone) {
         timeZone = TimeZone.getDefault()
-        log.error "Hub timeZone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
-        sendPush "Hub timeZone not set, using ${timeZone.getDisplayName()} timezone. Please set Hub location and timezone for the codes to work accurately"
+        def msg = "Hub geolocation not set, using ${timeZone.getDisplayName()} timezone. Use the SmartThings app to set the Hub geolocation to identify the correct timezone."
+        log.error msg
+        sendPush msg
     }
 
+    // Check if any day of week was selected to check levels and we're not forced
+    Calendar localCalendar = Calendar.getInstance(timeZone)
+    int currentDayOfWeek = localCalendar.get(Calendar.DAY_OF_WEEK)
+    log.warn "Current DOW: ${currentDayOfWeek as String}\nDOW: ${dayOfWeek}"
+    if (!force && dayOfWeek && !dayOfWeek.any { it.contains(currentDayOfWeek as String) }) {
+        log.trace "Skipping check today ($currentDayOfWeek) isn't part of the day of week checking schedule: $dayOfWeek"
+        return
+    }
+    
     for (rule in atomicState.rules) {
         def upper = settings."batteryUpper${rule.index}" as Integer
         def devices = settings."monitorDevices${rule.index}"
@@ -283,21 +337,21 @@ def checkBatteryLevels() {
                 def tmpMsg = "Last battery event for ${device.displayName} reported was ${(new Date(lastEvent)).format("EEE MMM dd yyyy HH:mm z", timeZone)}"
                 log.debug tmpMsg
                 if (lastEvent < (now() - 1*24*60*60*1000)) {
-                    sendNotificationMessage(tmpMsg)
+                    sendNotifications(tmpMsg)
                 }
             }*/
             if (monitor && days && lastEvent && (lastEvent < (now() - days*24*60*60*1000))) { // XX days since last event
                 def msg = "${device.displayName} has not reported any battery levels since ${(new Date(lastEvent)).format("EEE MMM dd yyyy HH:mm z", timeZone)}, check device health"
                 log.warn msg
-                sendNotificationMessage(msg)
+                sendNotifications(msg)
             } else { // All good with battery event reporting, check battery levels
                 def batteryLevel = device.currentValue("battery") as Integer
-                def msg = "${device.displayName} battery level is $batteryLevel%"
+                def msg = "${device.displayName} battery level is ${batteryLevel == null ? "unknown" : batteryLevel + "%"}"
                 //log.trace msg
                 if (batteryLevel < upper)
                 {
                     log.warn "${device.displayName} battery level $batteryLevel% below configured threshold of $upper%"
-                    sendNotificationMessage(msg)
+                    sendNotifications(msg)
                 }
             }
         }
@@ -306,38 +360,83 @@ def checkBatteryLevels() {
 
 private void sendText(number, message) {
     if (number) {
-        def phones = number.split("\\*")
+        def phones = number.replaceAll("[;,#]", "*").split("\\*") // Some users accidentally use ;,# instead of * and ST can't handle *,#+ in the number except for + at the beginning
         for (phone in phones) {
-            sendSms(phone, message)
+            try {
+                sendSms(phone, message)
+            } catch (Exception e) {
+                sendPush "Invalid phone number $phone"
+            }
         }
     }
 }
 
-private void sendNotificationMessage(message) {
+private void sendNotifications(message) {
+	if (!message) {
+		return
+    }
+    
     if (location.contactBookEnabled) {
-        log.debug "Sending message to $recipients"
         sendNotificationToContacts(message, recipients)
     } else {
-        log.debug "SMS: $sms, Push: $notify"
-        sms ? sendText(sms, message) : ""
-        notify ? sendPush(message) : sendNotificationEvent(message)
+        if (notify) {
+            sendPush message
+        } else if (silentPush) {
+            sendNotificationEvent(message)
+        }
+        if (sms) {
+            sendText(sms, message)
+        }
+    }
+    
+    audioDevices?.each { audioDevice -> // Play audio notifications
+        if (audioDevice.hasCommand("playText")) { // Check if it supports TTS
+            if (audioVolume) { // Only set volume if defined as it also resumes playback
+                audioDevice.playTextAndResume(message.replace("%", "percent"), audioVolume)
+            } else {
+                audioDevice.playText(message.replace("%", "percent"))
+            }
+        } else {
+            if (audioVolume) { // Only set volume if defined as it also resumes playback
+                audioDevice.playTrackAndResume(textToSpeech(message.replace("%", "percent"))?.uri, audioVolume) // No translations at this time
+            } else {
+                audioDevice.playTrack(textToSpeech(message.replace("%", "percent"))?.uri) // No translations at this time
+            }
+        }
     }
 }
 
-// Temporarily override the user settings
+// Override the user settings
+// Update a single setting
 private updateSetting(name, value) {
-    //app.updateSetting(name, value) // For SmartApps
-    settings[name] = value // For Device Handlers and SmartApps
+    app.updateSetting(name, value) // For SmartApps UI - THIS IS A VERY SLOW TRANSACTION as it writes directly to the DB
+    settings[name] = value // For Device Handlers and SmartApps - much faster but only works on uninitialized value (once the user updates it this approach won't work)
 }
 
+// Update multiple settings passed in a map
+private updateSettings(map) {
+    app.updateSettings(map)
+    map.each { name, value -> // Force the DB to reload new values
+        settings[name] = value
+    }
+}
+
+// Delete a single setting
 private deleteSetting(name) {
-    //app.deleteSetting(name) // For SmartApps delete it, TODO: Gives and error
+    //app.deleteSetting(name) // For SmartApps delete it, TODO: Gives and error - THIS IS A VERY SLOW TRANSACTION as it writes directly to the DB (don't mix app and settings approach or it causes corruption)
     //settings.remove(name) // For Device Handlers
-    clearSetting(name) // For SmartApps
+    app.updateSetting(name, '') // For SmartApps - THIS IS A VERY SLOW TRANSACTION as it writes directly to the DB (don't mix app and settings approach or it causes corruption)
+    settings[name] = '' // For Device Handlers and SmartApps - much faster but only works on uninitialized value (once the user updates it this approach won't work)
 }
 
-private clearSetting(name) {
-    app.updateSetting(name, '') // For SmartApps 
+// Delete multiple settings passed in an array
+private deleteSettings(map) {
+    def mapValues = [:]
+    map.each { mapValues[it] = '' }
+    app.updateSettings(mapValues)
+    map.each { name -> // Force the DB to reload new values
+        settings[name] = '' 
+    }
 }
 
 def checkForCodeUpdate(evt) {
@@ -365,7 +464,7 @@ def checkForCodeUpdate(evt) {
                 if (appVersion > clientVersion()) {
                     def msg = "New version of app ${app.label} available: $appVersion, current version: ${clientVersion()}.\nPlease visit $serverUrl to get the latest version."
                     log.info msg
-                    if (!disableUpdateNotifications) {
+                    if (updateNotifications != false) { // The default true may not be registered
                         sendPush(msg)
                     }
                 } else {
@@ -384,9 +483,9 @@ def checkForCodeUpdate(evt) {
                             def deviceName = device?.currentValue("dhName")
                             def deviceVersion = ret.data?."$deviceName"
                             if (deviceVersion && (deviceVersion > device?.currentValue("codeVersion"))) {
-                                def msg = "New version of device ${device?.displayName} available: $deviceVersion, current version: ${device?.currentValue("codeVersion")}.\nPlease visit $serverUrl to get the latest version."
+                                def msg = "New version of device handler for ${device?.displayName} available: $deviceVersion, current version: ${device?.currentValue("codeVersion")}.\nPlease visit $serverUrl to get the latest version."
                                 log.info msg
-                                if (!disableUpdateNotifications) {
+                                if (updateNotifications != false) { // The default true may not be registered
                                     sendPush(msg)
                                 }
                             } else {
@@ -403,3 +502,5 @@ def checkForCodeUpdate(evt) {
         log.error "Exception while querying latest app version: $e"
     }
 }
+
+// THIS IS THE END OF THE FILE
