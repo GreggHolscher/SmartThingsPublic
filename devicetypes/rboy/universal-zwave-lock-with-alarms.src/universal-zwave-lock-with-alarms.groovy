@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "04.06.05"
+    return "04.06.07"
 }
 
 /*
@@ -29,6 +29,8 @@ def clientVersion() {
 * Works with all Z-Wave Locks including Schlage, Yale, Kiwkset, Monoprice, DanaLock, IDLock, Samsung, KeyWe, Delaney, Popp and August
 *
 * Change Log
+* 2020-04-06 - (v04.06.07) Handle FE599 lock busy reports, enable motor load control for Kwikset, additional report handling
+* 2020-02-27 - (v04.06.06) Handle multiple hub installations and component rule actions better
 * 2020-02-06 - (v04.06.05) Update device health
 * 2020-02-04 - (v04.06.04) Added Kiwkset 913
 * 2020-01-31 - (v04.06.03) Get battery level if batteries are replaced
@@ -1219,13 +1221,24 @@ private def handleBatteryAlarmReport(cmd) {
 	def deviceName = device.displayName
 	def map = null
 	switch(cmd.zwaveAlarmEvent) {
-        case 0x01: //power has been applied, check if the battery level updated
+        case 0x01: // power has been applied, check if the battery level updated
             result << response(getBatteryState())
-            break;
-        case 0x0A:
+            break
+        case 0x09: // Load error
+        	map = [ descriptionText: "Motor load error", data: [ lockName: deviceName ]  ]
+            break
+        case 0x0C: // Battery charging
+        	map = [ descriptionText: "Battery is charging", displayed: true, data: [ lockName: deviceName ] ]
+            break
+        case 0x0D:
+        	map = [ descriptionText: "Battery is fully charged", displayed: true, data: [ lockName: deviceName ] ]
+	        break
+        case 0x0A: // Replace battery soon
+        case 0x0E: // Charge battery soon
 			map = [ name: "battery", value: 1, descriptionText: "Battery level critical", displayed: true, data: [ lockName: deviceName ] ]
 			break
-		case 0x0B:
+		case 0x0B: // Replace battery now
+        case 0x0F: // Charge battery now
 			map = [ name: "battery", value: 0, descriptionText: "Battery too low to operate lock", isStateChange: true, displayed: true, data: [ lockName: deviceName ] ]
 			break
 		default:
@@ -1250,13 +1263,13 @@ private def handleEmergencyAlarmReport(cmd) {
 	def map = null
 	switch(cmd.zwaveAlarmEvent) {
 		case 0x00: // IDLock
-			map = [ descriptionText: "Emergency cleared" ]
+			map = [ descriptionText: "Emergency cleared", data: [ lockName: deviceName ]  ]
 			break
 		case 0x01:
-			map = [ descriptionText: "Contact police" ]
+			map = [ descriptionText: "Contact police", displayed: true, data: [ lockName: deviceName ]  ]
 			break
 		case 0x02: // IDLock
-			map = [ descriptionText: "Contact fire service" ]
+			map = [ descriptionText: "Contact fire service", displayed: true, data: [ lockName: deviceName ]  ]
 			break
 		default:
 			// delegating it to handleAlarmReportUsingAlarmType
@@ -1299,7 +1312,7 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 			break
 		case 16: // Note: for levers this means it's unlocked, for non-motorized deadbolt, it's just unsecured and might not get unlocked
             // Note: Schlage FE599 non motorized deadbolt sends 16 and motorized deadbolts like BE469 send 19. However with non motorized deadbolts it only unsecures the handles and not unlocks, so we need to send a lock event after a few seconds only if it was currently locked
-			if(isSchlageLock() && ("634B" == zwaveInfo.prod && "504C" == zwaveInfo.model) && (device.currentValue("lock") == "locked")) {
+			if (isSchlageLock() && ("634B" == zwaveInfo.prod && ("504C" == zwaveInfo.model || "5044" == zwaveInfo.model)) && (device.currentValue("lock") == "locked")) {
             	log.trace "Non motorized bolt, resetting unlocked to locked notification in 3 seconds"
 				runIn(3, reLocked) // The bolt resecures after 3 seconds, send the locked event notification
             }
@@ -1382,8 +1395,14 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 				map = [ descriptionText: "DPS Open", displayed: false ]
 			}
 			break
+		case 48: // Schlage factory reset
+			result = allCodesDeletedEvent()
+			map = [ name: "codeChanged", value: "all deleted", descriptionText: "Factory reset, deleted all user codes", isStateChange: true ]
+			map.data = [notify: true, notificationText: "Deleted all user codes in $deviceName at ${location.name}"]
+			result << createEvent(name: "lockCodes", value: util.toJson([:]), displayed: false, descriptionText: "'lockCodes' attribute updated")
+			break
 		case 13:
-		case 112: // Master or user code changed/set
+		case 112: // Master or user code changed/set, Schlage/Kwikset
 			codeID = readCodeSlotId(cmd)
 			if(codeID == 0 && isKwiksetLock()) {
 				//Ignoring this AlarmReport as Kwikset reports codeID 0 when all slots are full and user tries to set another lock code manually
@@ -1410,6 +1429,10 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 			map = [ name: "codeChanged", value: "$codeID failed", descriptionText: "User code is duplicate and not added",
 				isStateChange: true, data: [isCodeDuplicate: true] ]
 			break
+        case 128: // Kwikset keypad power up, get battery level
+        	map = [ descriptionText: "Keypad powered up", displayed: true ]
+            result << response(getBatteryState())
+        	break
 		case 130:  // Batteries replaced (Yale YRD)
 			map = [ descriptionText: "Batteries replaced", isStateChange: true ]
             result << response(getBatteryState())
@@ -1420,24 +1443,28 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 		case 132: // Yale Out of schedule user (valid)
 			map = [ name: "invalidCode", value: "detected", descriptionText: "Out of Schedule user ${cmd.alarmLevel} was entered", isStateChange: true, displayed: true ]
 			break
-		case 144: // Yale unlocked using RFID tag
-			map = [ name: "lock", value: "unlocked" ]
-			if (cmd.alarmLevel > 0) {
-                codeID = readCodeSlotId(cmd)
-				codeName = getCodeName(lockCodes, codeID)
-				map.descriptionText = "Unlocked by \"$codeName\""
-				map.data = [ codeId: codeID as String, usedCode: codeID, codeName: codeName, method: "rfid" ]
-			} else {
-				map.descriptionText = "Unlocked manually"
-				map.data = [ method: "rfid" ]
-			}
+		case 144: // Yale unlocked using RFID tag, Schlage FE599/BE369 lock is busy
+			if (isSchlageLock() && ("634B" == zwaveInfo.prod && ("504C" == zwaveInfo.model || "5044" == zwaveInfo.model))) {
+                map = [ descriptionText: (cmd.alarmLevel ? "Lock is busy" : "Lock is ready") ]
+            } else {
+                map = [ name: "lock", value: "unlocked" ]
+                if (cmd.alarmLevel > 0) {
+                    codeID = readCodeSlotId(cmd)
+                    codeName = getCodeName(lockCodes, codeID)
+                    map.descriptionText = "Unlocked by \"$codeName\""
+                    map.data = [ codeId: codeID as String, usedCode: codeID, codeName: codeName, method: "rfid" ]
+                } else {
+                    map.descriptionText = "Unlocked manually"
+                    map.data = [ method: "rfid" ]
+                }
+            }
 			break
-		case 96: // Schlage FE599 (alarmType 96, alarmLevel 255)
+		case 96: // Schlage FE599/BE369 (alarmType 96, alarmLevel 255 -> keypad temporarily disabled)
 		case 161: // Tamper Alarm
 			if (cmd.alarmLevel == 2) {
 				map = [ name: "tamper", value: "detected", descriptionText: "Front escutcheon removed", isStateChange: true ]
 				runIn(60, resetTamper) // Clear tamper after 60 seconds, since tamper clear is never sent by a lock
-			} else if (cmd.alarmLevel == 1) {
+			} else if (cmd.alarmLevel == 1) { // Schlage
 				map = [ name: "invalidCode", value: "detected", descriptionText: "Keypad attempts exceed code entry limit", isStateChange: true, displayed: true ]
 			} else if (cmd.alarmLevel == 3) {
 				map = [ name: "tamper", value: "detected", descriptionText: "Handle open detected", isStateChange: true, displayed: true ] // Yale 6th gen Keyfree lock Handle Alarm
@@ -3075,6 +3102,25 @@ private kwiksetConfigurationReport(cmd) {
             map.descriptionText = "Status LED ${map.value}"
             results << createEvent(map)
             break
+            
+            
+        case kwiksetRemoteParamMap.MotorLoadControl.Param: // Remote config
+            map = []
+            switch (cmd.configurationValue[0]) {
+                case kwiksetRemoteParamMap.MotorLoadControl.Disabled:
+                    map.value = "disabled"
+                    break
+                case kwiksetRemoteParamMap.MotorLoadControl.Enabled:
+                    map.value = "enabled"
+                    break
+                default:
+                    map.value = "unknown"
+                    map.displayed = false
+                    break
+            }
+            map.descriptionText = "Status Motor Load Control ${map.value}"
+            results << createEvent(map)
+            break
 
         default:
             map = [ displayed: false, descriptionText: "$device.displayName: Parameter $cmd.parameterNumber configuration $cmd.configurationValue" ]
@@ -4524,6 +4570,10 @@ private yaleConfigureLock() {
 private kwiksetConfigureLock() {
     log.trace "Configure Kwikset settings"
     def cmds = []
+    
+    log.info "Enabling motor load control"
+    cmds << zwave.configurationV1.configurationSet(parameterNumber: kwiksetRemoteParamMap.MotorLoadControl.Param, configurationValue: [ kwiksetRemoteParamMap.MotorLoadControl.Enabled ])
+    cmds << zwave.configurationV1.configurationGet(parameterNumber: kwiksetRemoteParamMap.MotorLoadControl.Param)
 
     cmds ? secureSequence(cmds, 5000) : null
 }
@@ -4677,16 +4727,26 @@ def setContactState(String position, String msg) {
 }
 
 private createChildDevices() {
-    def physicalHubs = location.hubs.findAll { it.type == physicalgraph.device.HubType.PHYSICAL } // Ignore Virtual hubs
-    def hub = physicalHubs[0]
     def childDevs = childDevices
 
     if (!childDevs) {
-        log.info "Adding child device contact sensor"
-        def childDevice = addChildDevice("smartthings", "Child Contact Sensor", "${device.deviceNetworkId}-sensor", hub.id,
-                       [completedSetup: true, label: "${device.displayName} Contact Sensor",
-                        isComponent: !separateDevices, componentName: "sensor", componentLabel: "Contact Sensor"])
-        childDevice.sendEvent([ name: "contact", value: "closed", descriptionText: "$childDevice.displayName Resetting contact sensor", displayed: true ]) // Reset the state
+        try {
+            log.info "Adding child device contact sensor"
+            def childDevice = addChildDevice(
+                "smartthings",
+                "Child Contact Sensor",
+                "${device.deviceNetworkId}-sensor",
+                device.hub.id,
+                [
+                    completedSetup: true,
+                    label: "${device.displayName} Contact Sensor",
+                    isComponent: !separateDevices
+                ] + (!separateDevices ? [ componentName: "sensor", componentLabel: "Contact Sensor" ] : [:]) // Don't set this for isComponent is false
+            )
+            childDevice.sendEvent([ name: "contact", value: "closed", descriptionText: "$childDevice.displayName Resetting contact sensor", displayed: true ]) // Reset the state
+        } catch(Exception e) {
+            log.error "Unable to create child devices: ${e}"
+        }
     } else {
         log.trace "Installed child device: $childDevs"
     }
@@ -5123,6 +5183,7 @@ private getKwiksetRemoteParamMap(value = null) {
         "LED": 					[ Param: 35, Size: 1, Default: 1, Enabled: 1, Disabled: 0 ],
         "AutoLock": 			[ Param: 36, Size: 2, Default: 7680, Min: 0, Max: 65535, Value: reverseValue(value) ].with { put('ParamValue', paramValue(value, get('Size'))); it }, // 1st byte enable/disable autolock, 2nd byte timer 30(default)/60/90/120/180
         "Audio": 				[ Param: 37, Size: 1, Default: 1, Enabled: 1, Disabled: 0 ],
+        "MotorLoadControl":		[ Param: 47, Size: 1, Default: 0, Enabled: 1, Disabled: 0 ],
     ]
 }
 
