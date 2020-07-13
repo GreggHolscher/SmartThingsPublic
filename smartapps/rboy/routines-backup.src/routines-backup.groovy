@@ -21,19 +21,23 @@
 */ 
 
 def clientVersion() {
-    return "01.02.01"
+    return "01.04.02"
 }
 
 /**
-* Backup for Routines to verify that they did their job and if not complete their actions
-*
-* Copyright RBoy Apps, modification, reuse or redistribution of code is not allowed without permission
-*
-* 2018-12-11 - (v01.02.01) Fix for saved (dynamic) settings not showing due to change in ST app behavior
-* 2018-11-22 - (v01.02.00) Added support for announcing messages over a TTS device
-* 2018-9-21 - (v01.01.00) Added support to check and change target mode
-* 2018-7-27 - (v01.00.00) Initial release
-*
+ * Backup for Routines to verify that they did their job and if not complete their actions
+ *
+ * Copyright RBoy Apps, modification, reuse or redistribution of code is not allowed without permission
+ *
+ * 2020-01-20 - (v01.04.02) Update icons for broken ST Android app 2.18
+ * 2019-10-11 - (v01.04.01) Add support for the new Sonos integration (auto detect)
+ * 2019-06-15 - (v01.04.00) Added option to check for Classic SHM state changes and fix description for summary
+ * 2019-05-01 - (v01.03.00) Added option to partially open/close shades (where supported)
+ * 2019-04-09 - (v01.02.02) Add windows to message for doors
+ * 2018-12-11 - (v01.02.01) Fix for saved (dynamic) settings not showing due to change in ST app behavior
+ * 2018-11-22 - (v01.02.00) Added support for announcing messages over a TTS device
+ * 2018-09-21 - (v01.01.00) Added support to check and change target mode
+ * 2018-07-27 - (v01.00.00) Initial release
 */
 definition(
     name: "Routines Backup",
@@ -41,9 +45,9 @@ definition(
     author: "RBoy Apps",
     description: "Run a verification check to ensure that Routines did they job and if not complete the actions",
     category: "Safety & Security",
-    iconUrl: "http://smartthings.rboyapps.com/images/Routines.png",
-    iconX2Url: "http://smartthings.rboyapps.com/images/Routines.png",
-    iconX3Url: "http://smartthings.rboyapps.com/images/Routines.png")
+    iconUrl: "https://www.rboyapps.com/images/Routines.png",
+    iconX2Url: "https://www.rboyapps.com/images/Routines.png",
+    iconX3Url: "https://www.rboyapps.com/images/Routines.png")
 
 preferences {
     page(name: "mainPage")
@@ -73,16 +77,19 @@ private getCheckingDescription(mode) {
                    	settings."valves${mode}",
         			settings."valvesflip${mode}",
                     settings."thermostats${mode}",
+                    settings."targetMode${mode}" ? "Hub mode" : null,
+                    settings."targetSHMMode${mode}" ? "SHM state" : null,
+                    settings."homePhrase${mode}" ? "Run Routine" : null,
     			]
     
     for (device in devices) {                   
-        description += device ? (description ? "\n  " : "") + device?.join("\n  ") : ""
+        description += device ? (description ? "\n  " : "") + ([device]?.flatten())?.join("\n  ") : ""
     }
 
     if (!description) { // Nothing selected
         description = "No devices selected"
     } else {
-        description = "Checking:\n  " + description // Add the header
+        description = "Check:\n  " + description // Add the header
     }
 
     return description
@@ -108,7 +115,7 @@ def mainPage() {
                         passed: true 
                     ]
                     log.trace "Routine $mode"
-                    href(name: "modeDoorMonitor", params: hrefParams, title: "${mode}", page: "modeDoorMonitorPage", description: getCheckingDescription(mode), required: false, image: "http://smartthings.rboyapps.com/images/Routines.png")
+                    href(name: "modeDoorMonitor", params: hrefParams, title: "${mode}", page: "modeDoorMonitorPage", description: getCheckingDescription(mode), required: false, image: "https://www.rboyapps.com/images/Routines.png")
                 }
             }
         }
@@ -119,12 +126,15 @@ def mainPage() {
                 paragraph "You can enter multiple phone numbers to send an SMS to by separating them with a '*'. E.g. 5551234567*4447654321"
                 input name: "sms", title: "Send SMS notification to (optional):", type: "phone", required: false
             }
-            input name: "audioDevices", title: "Play notifications on these devices", type: "capability.audioNotification", required: false, multiple: true, image: "http://www.rboyapps.com/images/Horn.png"
+            input "audioDevices", "capability.audioNotification", title: "Speak notifications on", required: false, multiple: true, submitOnChange: true, image: "https://www.rboyapps.com/images/Horn.png"
+            if (audioDevices) {
+                input "audioVolume", "number", title: "...at this volume level (optional)", description: "keep current", required: false, range: "1..100"
+            }
         }
 
         section() {
             label title: "Assign a name for this SmartApp (optional)", required: false
-            input name: "disableUpdateNotifications", title: "Don't check for new versions of the app", type: "bool", required: false
+            input name: "updateNotifications", title: "Check for new versions of the app", type: "bool", defaultValue: true, required: false
         }
     }
 }
@@ -163,11 +173,11 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify if any of these selected garage doors are left open/closed"
             input "garagedoors${mode}", "capability.garageDoorControl", title: "Check for Open garage doors", required: false, multiple:true, submitOnChange: true
             if (settings."garagedoors${mode}") {
-                input "garagedoorsoff${mode}", "bool", title: "Close them?", required: false
+                input "garagedoorsoff${mode}", "bool", title: "...close them", required: false
             }
             input "garagedoorsflip${mode}", "capability.garageDoorControl", title: "Check for Closed garage doors", required: false, multiple:true, submitOnChange: true
             if (settings."garagedoorsflip${mode}") {
-                input "garagedoorsopen${mode}", "bool", title: "Open them?", required: false
+                input "garagedoorsopen${mode}", "bool", title: "...open them", required: false
             }
         }
 
@@ -175,11 +185,11 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify if any of these selected locks are Unlocked/Locked"
             input "locks${mode}", "capability.lock", title: "Check for Unlocked locks", required: false, multiple:true, submitOnChange: true
             if (settings."locks${mode}") {
-                input "locksoff${mode}", "bool", title: "Lock them?", required: false
+                input "locksoff${mode}", "bool", title: "...lock them", required: false
             }
             input "locksflip${mode}", "capability.lock", title: "Check for Locked locks", required: false, multiple:true, submitOnChange: true
             if (settings."locksflip${mode}") {
-                input "locksopen${mode}", "bool", title: "Unlock them?", required: false
+                input "locksopen${mode}", "bool", title: "...unlock them", required: false
             }
         }
 
@@ -187,11 +197,11 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify if any of these selected switches are On/Off"
             input "switches${mode}", "capability.switch", title: "Check for switches left On", required: false, multiple:true, submitOnChange: true
             if (settings."switches${mode}") {
-                input "switchesoff${mode}", "bool", title: "Turn them off?", required: false
+                input "switchesoff${mode}", "bool", title: "...turn them off", required: false
             }
             input "switchesflip${mode}", "capability.switch", title: "Check for switches left Off", required: false, multiple:true, submitOnChange: true
             if (settings."switchesflip${mode}") {
-                input "switcheson${mode}", "bool", title: "Turn them on?", required: false
+                input "switcheson${mode}", "bool", title: "...turn them on", required: false
             }
         }
 
@@ -199,11 +209,17 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify if any of these selected window shades/blinds are Open/Closed"
             input "shades${mode}", "capability.windowShade", title: "Check for shades left Open", required: false, multiple:true, submitOnChange: true
             if (settings."shades${mode}") {
-                input "shadesoff${mode}", "bool", title: "Close them?", required: false
+                input "shadesoff${mode}", "bool", title: "...close them", required: false, submitOnChange: true
+                if (settings."shadesoff${mode}") {
+                    input "shadesofflevel${mode}", "number", title: "...partial close (%)", description: "optional (1-99)", range: "1..99", required: false
+                }
             }
             input "shadesflip${mode}", "capability.windowShade", title: "Check for shades left Closed", required: false, multiple:true, submitOnChange: true
             if (settings."shadesflip${mode}") {
-                input "shadeson${mode}", "bool", title: "Open them?", required: false
+                input "shadeson${mode}", "bool", title: "...open them", required: false, submitOnChange: true
+                if (settings."shadeson${mode}") {
+                    input "shadesonlevel${mode}", "number", title: "...partial open (%)", description: "optional (1-99)", range: "1..99", required: false
+                }
             }
         }
 
@@ -211,11 +227,11 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify if any of these selected valves are Open/Closed"
             input "valves${mode}", "capability.valve", title: "Check for valves left Open", required: false, multiple:true, submitOnChange: true
             if (settings."valves${mode}") {
-                input "valvesoff${mode}", "bool", title: "Close them?", required: false
+                input "valvesoff${mode}", "bool", title: "...close them", required: false
             }
             input "valvesflip${mode}", "capability.valve", title: "Check for valves left Closed", required: false, multiple:true, submitOnChange: true
             if (settings."valvesflip${mode}") {
-                input "valveson${mode}", "bool", title: "Open them?", required: false
+                input "valveson${mode}", "bool", title: "...open them", required: false
             }
         }
 
@@ -223,9 +239,9 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify the thermostat heat/cool setpoints do not match"
             input "thermostats${mode}", "capability.thermostat", title: "Check Thermostats setpoint", required: false, multiple:true, submitOnChange: true
             if (settings."thermostats${mode}") {
-                input "heatingSetpoint${mode}", "decimal", title: "...Heating", required: true
-                input "coolingSetpoint${mode}", "decimal", title: "...Cooling", required: true
-                input "thermostatsSet${mode}", "bool", title: "Update setpoints?", required: false
+                input "heatingSetpoint${mode}", "decimal", title: "Heating", required: true
+                input "coolingSetpoint${mode}", "decimal", title: "Cooling", required: true
+                input "thermostatsSet${mode}", "bool", title: "...update setpoints", required: false
             }
         }
         
@@ -233,16 +249,24 @@ def modeDoorMonitorPage(params) {
             paragraph "Notify the hub Mode has not changed"
             input "targetMode${mode}", "mode", title: "New mode", description: "Select the target hub mode", required: false, multiple: false, submitOnChange: true
             if (settings."targetMode${mode}") {
-                input "targetModeSet${mode}", "bool", title: "Change mode?", required: false
+                input "targetModeSet${mode}", "bool", title: "...change mode", required: false
             }
         }
 
+        section("Check Classic SHM") {
+            paragraph "Notify the Classic SHM state has not changed"
+            input "targetSHMMode${mode}", "enum", title: "New SHM state", description: "Select the target SHM state", multiple: false, required: false, options: ["away": "Armed Away", "stay": "Armed Stay", "off": "Disarmed"], submitOnChange: true
+            if (settings."targetSHMMode${mode}") {
+                input "targetSHMModeSet${mode}", "bool", title: "...change state", required: false
+            }
+        }
+        
         section("Run Routine") {
             def phrases = location.helloHome?.getPhrases()
             phrases = phrases ? phrases*.label?.sort() - null : [] // Check for null ghost routines
             input "homePhrase${mode}", "enum", title: "Run routine", required: false, options: phrases, defaultValue: settings."homePhrase${mode}"
         }
-        
+
         section("Routine Verification and Notifications Options") {
             paragraph "Use this option to delay before checking/taking actions for any devices after the routine runs\nThis can allow for an exit delay or for apps to complete their tasks"
             input "delayAction${mode}", "number", title: "Delay by (seconds)", required: false, range: "1..*"
@@ -255,7 +279,7 @@ def modeDoorMonitorPage(params) {
                     paragraph "You can enter multiple phone numbers to send an SMS to by separating them with a '*'. E.g. 5551234567*4447654321"
                     input "sms${mode}", "phone", title: "Send SMS notification to (optional):", required: false
                 }
-                input "audioDevices${mode}", "capability.audioNotification", title: "Play notifications on these devices", required: false, multiple: true, image: "http://www.rboyapps.com/images/Horn.png"
+                input "audioDevices${mode}", "capability.audioNotification", title: "Speak notifications on", required: false, multiple: true, image: "https://www.rboyapps.com/images/Horn.png"
             }
         }
     }
@@ -286,7 +310,7 @@ def subscribeToEvents() {
     def random = new Random()
     Integer randomHour = random.nextInt(18-10) + 10
     Integer randomDayOfWeek = random.nextInt(7-1) + 1 // 1 to 7
-    schedule("0 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
+    schedule("* 0 " + randomHour + " ? * " + randomDayOfWeek, checkForCodeUpdate) // Check for code updates once a week at a random day and time between 10am and 6pm
 }
 
 def modeChangeHandler(evt = null) {
@@ -321,12 +345,12 @@ def modeChangeHandler(evt = null) {
         }
 
         if(message) {
-            message = "These doors were Open after routine $mode completed" + message
+            message = "These doors/windows were Open after routine $mode completed" + message
             log.info message
             msgs << message
         }
     } else {
-        log.trace "No doors/windows found to check for open after routine $mode completed"
+        //log.trace "No doors/windows found to check for open after routine $mode completed"
     }    
 
     // Check for open doors/windows left closed
@@ -341,12 +365,12 @@ def modeChangeHandler(evt = null) {
         }
 
         if(message) {
-            message = "These doors were Closed after routine $mode completed" + message
+            message = "These doors/windows were Closed after routine $mode completed" + message
             log.info message
             msgs << message
         }
     } else {
-        log.trace "No doors/windows found to check for closed after routine $mode completed"
+        //log.trace "No doors/windows found to check for closed after routine $mode completed"
     }    
 
     // Check for switches left on
@@ -373,7 +397,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No switches found to check for on after routine $mode completed"
+        //log.trace "No switches found to check for on after routine $mode completed"
     }    
 
     // Check for switches left off
@@ -400,7 +424,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No switches found to check for off after routine $mode completed"
+        //log.trace "No switches found to check for off after routine $mode completed"
     }    
 
     // Check for locks left unlocked
@@ -427,7 +451,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No locks found to check for unlocked after routine $mode completed"
+        //log.trace "No locks found to check for unlocked after routine $mode completed"
     }    
 
     // Check for locks left locked
@@ -454,7 +478,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No locks found to check for locked after routine $mode completed"
+        //log.trace "No locks found to check for locked after routine $mode completed"
     }    
 
     // Check for garage doors left open
@@ -481,7 +505,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No garage doors found to check for open after routine $mode completed"
+        //log.trace "No garage doors found to check for open after routine $mode completed"
     }    
 
     // Check for garage doors left closed
@@ -508,7 +532,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No garage doors found to check for closed after routine $mode completed"
+        //log.trace "No garage doors found to check for closed after routine $mode completed"
     }    
 
     // Check for shades left open
@@ -518,7 +542,16 @@ def modeChangeHandler(evt = null) {
             if (shade.currentValue("windowShade") != "closed") {
                 message += ", $shade"
                 if (settings."shadesoff${mode}") {
-                    shade.close()
+                    if (settings."shadesofflevel${mode}") {
+                        try { // Not all DTH's implement this
+                            shade.setLevel(settings."shadesofflevel${mode}")
+                        } catch (e) {
+                            log.error "$shade does not support partial controls: $e"
+                            shade.close() // Just do a regular close
+                        }
+                    } else {
+                        shade.close()
+                    }
                 }
             } else {
                 log.debug "$shade is currently Closed"
@@ -535,7 +568,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No window shades found to check for open after routine $mode completed"
+        //log.trace "No window shades found to check for open after routine $mode completed"
     }    
 
     // Check for window shades left closed
@@ -545,7 +578,16 @@ def modeChangeHandler(evt = null) {
             if (shade.currentValue("windowShade") != "open") {
                 message += ", $shade"
                 if (settings."shadeson${mode}") {
-                    shade.open()
+                    if (settings."shadesonlevel${mode}") {
+                        try { // Not all DTH's implement this
+                            shade.setLevel(settings."shadesonlevel${mode}")
+                        } catch (e) {
+                            log.error "$shade does not support partial controls: $e"
+                            shade.open() // Just do a regular open
+                        }
+                    } else {
+                        shade.open()
+                    }
                 }
             } else {
                 log.debug "$shade is currently Open"
@@ -562,7 +604,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No window shades found to check for closed after routine $mode completed"
+        //log.trace "No window shades found to check for closed after routine $mode completed"
     }    
 
     // Check for valves left open
@@ -589,7 +631,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No valves found to check for open after routine $mode completed"
+        //log.trace "No valves found to check for open after routine $mode completed"
     }    
 
     // Check for valves left closed
@@ -616,7 +658,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No valves found to check for closed after routine $mode completed"
+        //log.trace "No valves found to check for closed after routine $mode completed"
     }
     
     // Check Thermostat setpoints
@@ -667,7 +709,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No thermostats found to check setpoints after routine $mode completed"
+        //log.trace "No thermostats found to check setpoints after routine $mode completed"
     }
 
     // Check if Mode has changed
@@ -692,9 +734,30 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No target Mode to check after routine $mode completed"
+        //log.trace "No target Mode to check after routine $mode completed"
     }
     
+    // Check if Classic SHM State has changed
+    if (settings."targetSHMMode${mode}") {
+        def message = ""
+        def shmMode = location.currentState("alarmSystemStatus")?.value
+        if (!settings."targetSHMMode${mode}".contains(shmMode)) {
+            message += "SHM was not in Mode ${settings."targetSHMMode${mode}"} after routine $mode completed"
+            if (settings."targetSHMModeSet${mode}") {
+                sendLocationEvent(name: "alarmSystemStatus", value: settings."targetSHMMode${mode}")
+                message += ", changing SHM state to ${settings."targetSHMMode${mode}"}"
+            }
+        } else {
+            log.debug "SHM state is set to ${shmMode}"
+        }
+
+        if(message) {
+            log.info message
+            msgs << message
+        }
+    } else {
+        //log.trace "No target SHM state to check after routine $mode completed"
+    }
     
     // Run routine if required, do this last as it can timeout
     if (settings."homePhrase${mode}") {
@@ -706,7 +769,7 @@ def modeChangeHandler(evt = null) {
             msgs << message
         }
     } else {
-        log.trace "No routines to run after routine $mode completed"
+        //log.trace "No routines to run after routine $mode completed"
     }
     
     // Last this to do is send messages since these can time out
@@ -725,9 +788,13 @@ def modeChangeHandler(evt = null) {
 
 private sendText(number, message) {
     if (number) {
-        def phones = number.split("\\*")
+        def phones = number.replaceAll("[;,#]", "*").split("\\*") // Some users accidentally use ;,# instead of * and ST can't handle *,#+ in the number except for + at the beginning
         for (phone in phones) {
-            sendSms(phone, message)
+            try {
+                sendSms(phone, message)
+            } catch (Exception e) {
+                sendPush "Invalid phone number $phone"
+            }
         }
     }
 }
@@ -745,8 +812,21 @@ private sendMessages(mode, message) {
                 sendText(settings."sms${mode}", message)
             }
         }
-        if (settings."audioDevices${mode}") {
-            settings."audioDevices${mode}"*.playTextAndResume(message)
+        
+        settings."audioDevices${mode}"?.each { audioDevice -> // Play audio notifications
+            if (audioDevice.hasCommand("playText")) { // Check if it supports TTS
+                if (audioVolume) { // Only set volume if defined as it also resumes playback
+                    audioDevice.playTextAndResume(message, audioVolume)
+                } else {
+                    audioDevice.playText(message)
+                }
+            } else {
+                if (audioVolume) { // Only set volume if defined as it also resumes playback
+                    audioDevice.playTrackAndResume(textToSpeech(message)?.uri, audioVolume) // No translations at this time
+                } else {
+                    audioDevice.playTrack(textToSpeech(message)?.uri) // No translations at this time
+                }
+            }
         }
     } else {
         if (location.contactBookEnabled) {
@@ -760,8 +840,21 @@ private sendMessages(mode, message) {
                 sendText(sms, message)
             }
         }
-        if (settings."audioDevices") {
-            settings."audioDevices"*.playTextAndResume(message)
+
+        settings."audioDevices"?.each { audioDevice -> // Play audio notifications
+            if (audioDevice.hasCommand("playText")) { // Check if it supports TTS
+                if (audioVolume) { // Only set volume if defined as it also resumes playback
+                    audioDevice.playTextAndResume(message, audioVolume)
+                } else {
+                    audioDevice.playText(message)
+                }
+            } else {
+                if (audioVolume) { // Only set volume if defined as it also resumes playback
+                    audioDevice.playTrackAndResume(textToSpeech(message)?.uri, audioVolume) // No translations at this time
+                } else {
+                    audioDevice.playTrack(textToSpeech(message)?.uri) // No translations at this time
+                }
+            }
         }
     }
 }
@@ -791,7 +884,7 @@ def checkForCodeUpdate(evt) {
                 if (appVersion > clientVersion()) {
                     def msg = "New version of app ${app.label} available: $appVersion, current version: ${clientVersion()}.\nPlease visit $serverUrl to get the latest version."
                     log.info msg
-                    if (!disableUpdateNotifications) {
+                    if (updateNotifications != false) { // The default true may not be registered
                         sendPush(msg)
                     }
                 } else {
@@ -822,9 +915,9 @@ def checkForCodeUpdate(evt) {
                             def deviceName = device?.currentValue("dhName")
                             def deviceVersion = ret.data?."$deviceName"
                             if (deviceVersion && (deviceVersion > device?.currentValue("codeVersion"))) {
-                                def msg = "New version of device ${device?.displayName} available: $deviceVersion, current version: ${device?.currentValue("codeVersion")}.\nPlease visit $serverUrl to get the latest version."
+                                def msg = "New version of device handler for ${device?.displayName} available: $deviceVersion, current version: ${device?.currentValue("codeVersion")}.\nPlease visit $serverUrl to get the latest version."
                                 log.info msg
-                                if (!disableUpdateNotifications) {
+                                if (updateNotifications != false) { // The default true may not be registered
                                     sendPush(msg)
                                 }
                             } else {
@@ -844,3 +937,4 @@ def checkForCodeUpdate(evt) {
 
 
 // THIS IS THE END OF THE FILE
+

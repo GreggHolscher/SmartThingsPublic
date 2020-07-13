@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "02.02.01"
+    return "02.02.02"
 }
 
 /*
@@ -30,6 +30,7 @@ def clientVersion() {
  * Copyright RBoy Apps, redistribution or reuse of code is not allowed without permission
  *
  * Change Log
+ * 2020-05-04 - (v02.02.02) Try to detect platform outage and prevent code upgrade spam notifications
  * 2020-01-20 - (v02.02.01) Update icons for broken ST Android app 2.18
  * 2019-12-14 - (v02.02.00) Extend door closure when motion is detected
  * 2019-10-11 - (v02.01.03) Add support for the new Sonos integration (auto detect)
@@ -536,7 +537,7 @@ def leaveHandler(evt) {
 
 private versionCheck() {
     // Check if the user has upgraded the SmartApp and reinitailize if required
-    if (state.clientVersion != clientVersion()) {
+    if (state.clientVersion && (state.clientVersion != clientVersion())) { // Check for platform outage (null)
         def msg = "NOTE: ${app.label} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
         log.warn msg
         runIn(1, initialize) // Reinitialize the app offline

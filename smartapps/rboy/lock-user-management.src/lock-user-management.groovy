@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "07.10.03"
+    return "07.11.00"
 }
 
 /**
@@ -30,6 +30,8 @@ def clientVersion() {
 * Copyright RBoy Apps, redistribution or reuse of code is not allowed without permission
 *
 * Change Log:
+* 2020-05-01 - (v07.11.00) Added option to toggle switches on keypad lock/unlock/arm modes
+* 2020-04-02 - (v07.10.04) Fix for keypad lock report for Enhanced ZigBee device handler
 * 2020-01-20 - (v07.10.03) Update icons for broken ST Android app 2.18
 * 2019-11-26 - (v07.10.02) Update for changes in platform limits, optimize performance
 * 2019-11-05 - (v07.10.00) Improved user status display logic, don't drop requests if retry fails, try again next time user saves the app
@@ -552,6 +554,7 @@ def unlockKeypadActionsPage(params) {
             input "turnOnSwitchesAfterSunset${lock}${user}", "capability.switch", title: "Turn on light(s) after dark", required: false, multiple: true
             input "turnOnSwitches${lock}${user}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
             input "turnOffSwitches${lock}${user}", "capability.switch", title: "Turn off switch(s)", required: false, multiple: true
+            input "toggleSwitches${lock}${user}", "capability.switch", title: "Toggle switch(s)", required: false, multiple: true
             input "unlockLocks${lock}${user}","capability.lock", title: "Unlock lock(s)", required: false, multiple: true
             input "openGarage${lock}${user}","capability.garageDoorControl", title: "Open garage door(s)", required: false, multiple: true
 
@@ -659,6 +662,7 @@ def armKeypadActionsPage(params) {
                 input "externalLockMode${lock}${user}${arm}", "mode", title: "Change mode to", required: false, multiple: false, defaultValue: priorHomeMode
                 input "externalLockTurnOnSwitches${lock}${user}${arm}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
                 input "externalLockTurnOffSwitches${lock}${user}${arm}", "capability.switch", title: "Turn off switch(s)", required: false, multiple: true
+                input "externalLockToggleSwitches${lock}${user}${arm}", "capability.switch", title: "Toggle switch(s)", required: false, multiple: true
                 input "lockLocks${lock}${user}${arm}","capability.lock", title: "Lock lock(s)", required: false, multiple: true
                 input "closeGarage${lock}${user}${arm}","capability.garageDoorControl", title: "Close garage door(s)", required: false, multiple: true
             }
@@ -734,6 +738,7 @@ def lockKeypadActionsPage(params) {
             input "externalLockMode${lock}${user}", "mode", title: "Change mode to", required: false, multiple: false, defaultValue: priorHomeMode
             input "externalLockTurnOnSwitches${lock}${user}", "capability.switch", title: "Turn on switch(s)", required: false, multiple: true
             input "externalLockTurnOffSwitches${lock}${user}", "capability.switch", title: "Turn off switch(s)", required: false, multiple: true
+            input "externalLockToggleSwitches${lock}${user}", "capability.switch", title: "Toggle switch(s)", required: false, multiple: true
             input "lockLocks${lock}${user}","capability.lock", title: "Lock lock(s)", required: false, multiple: true
             input "closeGarage${lock}${user}","capability.garageDoorControl", title: "Close garage door(s)", required: false, multiple: true
 
@@ -2137,7 +2142,7 @@ def processUnlockEvent(evt) {
     }
     
     def user = (data?.usedCode as String) ?: ((data?.codeId as String) ?: "") // get the user if present
-    def i = (data?.usedCode as Integer) ?: ((data?.codeId as Integer) ?: 0) // get the user if present
+    def i = ((data?.usedCode ?: 0) as Integer) ?: (((data?.codeId ?: 0) as Integer) ?: 0) // get the user if present
     def lockMode = data?.type ?: (data?.method ?: (evt.descriptionText?.contains("manually") ? "manually" : "electronically"))
     // Fix for proper grammar
     switch (lockMode) {
@@ -2390,6 +2395,14 @@ def processUnlockEvent(evt) {
                 msg += detailedNotifications ? ", turning off switches ${settings."turnOffSwitches${lockStr}${user}"}" : ""
             }
             
+            if (settings."toggleSwitches${lockStr}${user}") {
+                log.info "$evt.displayName was unlocked successfully, toggling switches ${settings."toggleSwitches${lockStr}${user}"}"
+                settings."toggleSwitches${lockStr}${user}".each { dev ->
+                	dev.currentValue("switch") == "on" ? dev?.off() : dev?.on()
+                }
+                msg += detailedNotifications ? ", toggling switches ${settings."toggleSwitches${lockStr}${user}"}" : ""
+            }
+
             if (settings."unlockLocks${lockStr}${user}") {
                 log.info "$evt.displayName was unlocked successfully, unlocking ${settings."unlockLocks${lockStr}${user}"}"
                 settings."unlockLocks${lockStr}${user}"?.unlock()
@@ -2480,7 +2493,7 @@ def processLockEvent(evt) {
     evt.lockMode = lockMode // Save the lockMode calculated
     evt.data = data // Update the data to be passed
     user = (data?.usedCode as String) ?: ((data?.codeId as String) ?: "") // get the user if present
-    i = (data?.usedCode as Integer) ?: ((data?.codeId as Integer) ?: 0) // get the user if present
+    i = ((data?.usedCode ?: 0) as Integer) ?: (((data?.codeId ?: 0) as Integer) ?: 0) // get the user if present
     log.trace "$lock locked by user $user $lockMode"
 
     // Check if we have user override unlock actions defined
@@ -2598,7 +2611,7 @@ def processLockActions(evt) {
     def lockMode = evt.lockMode
     def arm = "" // Security keypad arm mode (optional)
     def user = (data?.usedCode as String) ?: ((data?.codeId as String) ?: "") // get the user if present
-    def i = (data?.usedCode as Integer) ?: ((data?.codeId as Integer) ?: 0) // get the user if present
+    def i = ((data?.usedCode ?: 0) as Integer) ?: (((data?.codeId ?: 0) as Integer) ?: 0) // get the user if present
 
     log.trace "Processing $lock lock actions: $evt"
 
@@ -2764,8 +2777,6 @@ def processLockActions(evt) {
                 log.info "$evt.displayName was locked successfully, running routine ${settings."externalLockPhrase${lockStr}${user}${arm}"}"
                 location.helloHome.execute(settings."externalLockPhrase${lockStr}${user}${arm}")
                 msg += detailedNotifications ? ", running ${settings."externalLockPhrase${lockStr}${user}${arm}"}" : ""
-            } else {
-                log.trace "No individual routine configured to run when locked $lockMode for $lock"
             }
 
             if (settings."externalLockTurnOnSwitches${lockStr}${user}${arm}") {
@@ -2780,6 +2791,14 @@ def processLockActions(evt) {
                 msg += detailedNotifications ? ", turning off switches ${settings."externalLockTurnOffSwitches${lockStr}${user}${arm}"}" : ""
             }
             
+            if (settings."externalLockToggleSwitches${lockStr}${user}${arm}") {
+                log.info "$evt.displayName was locked successfully, toggling switches ${settings."externalLockToggleSwitches${lockStr}${user}${arm}"}"
+                settings."externalLockToggleSwitches${lockStr}${user}${arm}".each { dev ->
+                	dev.currentValue("switch") == "on" ? dev?.off() : dev?.on()
+                }
+                msg += detailedNotifications ? ", toggling switches ${settings."externalLockToggleSwitches${lockStr}${user}${arm}"}" : ""
+            }
+
             if (settings."lockLocks${lockStr}${user}${arm}") {
                 log.info "$evt.displayName was locked successfully, locking ${settings."lockLocks${lockStr}${user}${arm}"}"
                 settings."lockLocks${lockStr}${user}${arm}"?.lock()
@@ -2855,8 +2874,6 @@ def processLockActions(evt) {
                 log.info "$evt.displayName was locked successfully, running routine ${settings."externalLockPhraseManual${lockStr}"}"
                 location.helloHome.execute(settings."externalLockPhraseManual${lockStr}")
                 msg += detailedNotifications ? ", running ${settings."externalLockPhraseManual${lockStr}"}" : ""
-            } else {
-                log.trace "No individual routine configured to run when locked $lockMode for $lock"
             }
 
             if (settings."externalLockTurnOnSwitchesManual${lockStr}") {
@@ -2963,8 +2980,8 @@ def clearAllCodes() {
 
 def codeCheck() {
     // Check if the user has upgraded the SmartApp and reinitailize if required
-    if (state.clientVersion != clientVersion()) {
-        def msg = "NOTE: ${app.label} detected a code upgrade. Updating configuration, please open the app and click on Save to re-validate your settings"
+    if (state.clientVersion && (state.clientVersion != clientVersion())) { // Check for platform outage (null)
+        def msg = "NOTE: ${app.label} detected a code upgrade. Updating configuration, please open the app and re-validate your settings"
         log.warn msg
         startTimer(1, appTouch) // Reinitialize the app offline to avoid a loop as appTouch calls codeCheck
         sendNotifications(msg) // Do this in the end as it may timeout
@@ -2995,7 +3012,7 @@ def codeCheck() {
 
     for (lock in locks) {
     	if ((state.lockCodes == null) || (state.lockCodes[lock.id] == null) || (state.retryCodeCount[lock.id] == null)) { // If we have a situation where the user added a new lock without tapping save reinitialize the app
-            def msg = "${app.label} detected an unsaved configuration change. Reinitializing the app, please open the app and click on Save to re-validate your settings"
+            def msg = "${app.label} detected an unsaved configuration change. Reinitializing the app, please open the app and re-validate your settings"
             log.warn msg
             startTimer(1, appTouch) // Reinitialize the app offline to avoid a loop as appTouch calls codeCheck
             return // We're done here
